@@ -1,0 +1,42 @@
+# Example pipeline topology for QueryLens scenarios.
+#
+# This models a two-source ingestion pipeline that merges into a shared
+# validation stage before branching into aggregation and a direct sink.
+# Used as the fixture topology in tests/test_topology.py and as the default
+# topology for local development scenarios.
+#
+# Stage layout:
+#
+#   source_postgres ──┐
+#                     ├──► transform_validate ──► transform_aggregate ──► sink_warehouse
+#   source_kafka ─────┘
+
+stages:
+  - stage_id: source_postgres
+    stage_type: source
+    upstream_ids: []
+    propagation_delay_ms: 0.0
+
+  - stage_id: source_kafka
+    stage_type: source
+    upstream_ids: []
+    propagation_delay_ms: 0.0
+
+  - stage_id: transform_validate
+    stage_type: transform
+    upstream_ids:
+      - source_postgres
+      - source_kafka
+    propagation_delay_ms: 20.0
+
+  - stage_id: transform_aggregate
+    stage_type: transform
+    upstream_ids:
+      - transform_validate
+    propagation_delay_ms: 45.0
+
+  - stage_id: sink_warehouse
+    stage_type: sink
+    upstream_ids:
+      - transform_aggregate
+    propagation_delay_ms: 30.0
