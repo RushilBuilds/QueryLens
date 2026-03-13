@@ -1,0 +1,88 @@
+version: "3.9"
+
+# I'm using Redpanda instead of a full Kafka + ZooKeeper stack because it's a
+# single-binary Kafka-compatible broker — eliminates ZooKeeper coordination overhead
+# and drops cold-start time from ~30s to ~2s, which matters for local dev loops.
+
+services:
+
+  redpanda:
+    image: redpandadata/redpanda:v23.3.6
+    container_name: querylens_redpanda
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+    ports:
+      - "9092:9092"       # Kafka-compatible external listener
+      - "29092:29092"     # Internal inter-container listener
+      - "8082:8082"       # Pandaproxy REST API (useful for debugging without a client)
+      - "9644:9644"       # Redpanda admin API
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "--brokers=localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redpanda_console:
+    image: redpandadata/console:v2.4.3
+    container_name: querylens_console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: "redpanda:29092"
+    ports:
+      - "8080:8080"       # Web UI for inspecting topics and consumer groups
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: querylens_postgres
+    environment:
+      POSTGRES_USER: querylens
+      POSTGRES_PASSWORD: querylens
+      POSTGRES_DB: querylens
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U querylens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: querylens_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://querylens:querylens@postgres:5432/querylens"
+      REDPANDA_BROKERS: "redpanda:29092"
+      LOG_LEVEL: "INFO"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  redpanda_data:
+  postgres_data:

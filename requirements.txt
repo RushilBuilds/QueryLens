@@ -1,0 +1,64 @@
+# ── Streaming & Messaging ─────────────────────────────────────────────────────
+# confluent-kafka is the production-grade client; kafka-python is simpler but
+# lacks the librdkafka performance tuning we'll need at higher throughput.
+confluent-kafka==2.3.0
+
+# ── API Layer ─────────────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+pydantic-settings==2.2.1    # settings management via env vars and .env files
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0             # async postgres driver for SQLAlchemy async engine
+psycopg2-binary==2.9.9      # sync driver kept for Alembic migrations
+alembic==1.13.1
+
+# ── Data Processing & Statistics ──────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.0               # I'm using scipy.stats for CUSUM and EWMA baselines
+
+# ── Causal Inference & Graph Analysis ─────────────────────────────────────────
+networkx==3.3               # pipeline topology DAG and causal graph traversal
+# pgmpy provides Bayesian network inference for causal fault localization;
+# chose it over dowhy because it's lighter and we don't need the full refutation suite
+pgmpy==0.1.25
+
+# ── Observability ─────────────────────────────────────────────────────────────
+structlog==24.1.0            # structured logging with trace ID propagation
+prometheus-client==0.20.0   # exposes /metrics for Prometheus scraping
+opentelemetry-api==1.24.0
+opentelemetry-sdk==1.24.0
+opentelemetry-instrumentation-fastapi==0.45b0
+opentelemetry-instrumentation-sqlalchemy==0.45b0
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+streamlit==1.33.0
+plotly==5.22.0              # interactive pipeline health and anomaly timeline charts
+altair==5.3.0
+
+# ── Configuration & Environment ───────────────────────────────────────────────
+python-dotenv==1.0.1
+dynaconf==3.2.5             # layered config (defaults → env-specific → env vars)
+
+# ── HTTP Client (for inter-service calls and webhook healing actions) ──────────
+httpx==0.27.0
+
+# ── Scheduling & Background Tasks ─────────────────────────────────────────────
+apscheduler==3.10.4         # drives the sliding window aggregator on a tick interval
+anyio==4.3.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.2.0
+pytest-asyncio==0.23.6
+pytest-cov==5.0.0
+httpx==0.27.0               # async test client for FastAPI (used via TestClient)
+factory-boy==3.3.0          # fixture factories for pipeline metric objects
+freezegun==1.5.0            # deterministic time control in detector unit tests
+testcontainers==4.3.3       # spins up real Postgres and Redpanda in CI
+
+# ── Code Quality ──────────────────────────────────────────────────────────────
+ruff==0.4.4                 # linting and formatting — replaces flake8 + black + isort
+mypy==1.10.0
