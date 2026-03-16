@@ -35,7 +35,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 1 | `PipelineEvent` + `PoissonEventGenerator` | Done |
 | 2 | `PipelineTopologyGraph` + `TopologyLoader` | Done |
 | 3 | `FaultInjector` + `FaultSchedule` | Done |
-| 4 | `SimulatorEngine` + `ScenarioConfig` | Pending |
+| 4 | `SimulatorEngine` + `ScenarioConfig` | Done |
 | 5 | PostgreSQL schema + Alembic migrations | Pending |
 | 6 | `RedpandaProducer` + serialization | Pending |
 | 7 | `MetricConsumer` + `IngestionWorker` | Pending |
@@ -261,6 +261,34 @@ for event in event_stream:
 
 ---
 
+### Milestone 4: SimulationClock, SimulatorEngine, ScenarioConfig
+
+**`simulator/engine.py`**
+
+`SimulationClock` tracks virtual time as `start_time + tick_count × tick_interval_ms`. Computing each timestamp multiplicatively from a fixed origin rather than accumulating timedeltas prevents floating-point drift — over 100,000 ticks at 1ms each, cumulative addition drifts by 10–50 microseconds depending on the platform; the multiplicative approach stays within 1 microsecond of the exact value.
+
+`SimulatorEngine` pre-generates all events for the full simulation window upfront rather than generating per tick. Calling `PoissonEventGenerator.generate()` once per tick would restart the inter-arrival chain at each tick boundary, introducing artificial gaps at tick edges and breaking the statistical properties of the Poisson process. Pre-generating and filtering to the window preserves continuous inter-arrival statistics across boundaries. Stage RNGs are derived via `np.random.SeedSequence.spawn()` so each stage has an independent RNG stream — adding or removing a stage does not change any other stage's event sequence.
+
+`ScenarioConfig` is a thin YAML loader that resolves the topology path relative to the scenario file's parent directory (not the process working directory), making scenario files portable across machines regardless of where they are invoked from. `build_engine()` constructs a fresh clock and injector on every call to guarantee clean RNG state — the reproducibility contract is: same YAML + same seed → same event stream, every time.
+
+```python
+from pathlib import Path
+from simulator.engine import ScenarioConfig
+
+config = ScenarioConfig.load(Path("config/scenario_example.yaml"))
+
+# Both runs produce byte-for-byte identical event streams.
+events_a = list(config.build_engine().run(n_ticks=120))
+events_b = list(config.build_engine().run(n_ticks=120))
+assert events_a == events_b
+```
+
+**`config/scenario_example.yaml`** — a 120-tick scenario with a 5× latency spike at `source_postgres` from t=30s to t=90s. Used as the fixture for integration tests and as the reference scenario for detection benchmarking in Milestone 14.
+
+**Tests** in `tests/test_engine.py`: 10 tests covering clock initial state, per-tick advancement, no-drift over 100k ticks, multi-stage event generation, chronological ordering, simulation window boundaries, fault label application, YAML loading, identical-seed reproducibility, and seed sensitivity.
+
+---
+
 ## Repository layout
 
 ```
@@ -269,7 +297,8 @@ QueryLens/
 │   ├── models.py           PipelineEvent dataclass
 │   ├── topology.py         PipelineStage, PipelineTopologyGraph, TopologyLoader
 │   ├── workload.py         WorkloadProfile, PoissonEventGenerator
-│   └── fault_injection.py  FaultSpec, FaultSchedule, FaultInjector
+│   ├── fault_injection.py  FaultSpec, FaultSchedule, FaultInjector
+│   └── engine.py           SimulationClock, SimulatorEngine, ScenarioConfig
 ├── ingestion/              Milestones 6 to 8
 ├── detection/              Milestones 9 to 14
 ├── causal/                 Milestones 15 to 18
@@ -279,9 +308,11 @@ QueryLens/
 ├── tests/
 │   ├── test_workload.py         Milestone 1 tests
 │   ├── test_topology.py         Milestone 2 tests
-│   └── test_fault_injection.py  Milestone 3 tests
+│   ├── test_fault_injection.py  Milestone 3 tests
+│   └── test_engine.py           Milestone 4 integration tests
 ├── config/
-│   └── topology_example.yaml
+│   ├── topology_example.yaml
+│   └── scenario_example.yaml
 ├── docker-compose.yml
 ├── requirements.txt
 ├── ROADMAP.md

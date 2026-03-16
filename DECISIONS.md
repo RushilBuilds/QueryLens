@@ -10,6 +10,24 @@ This document logs every major architectural decision made during the developmen
 **Alternatives considered:** Apache Kafka, AWS Kinesis, RabbitMQ
 **Reasoning:** Redpanda is Kafka-API compatible so all consumer/producer code is identical, but eliminates ZooKeeper dependency which significantly reduces local development complexity. For a single-node development environment this removes an entire infrastructure component without sacrificing any functionality we need.
 
+## ADR-005: SimulationClock uses multiplicative timestamp computation to prevent drift
+**Date:** 2026-03-16
+**Decision:** Compute `current_time` as `start_time + tick_count × tick_interval_ms` rather than accumulating via repeated timedelta addition
+**Alternatives considered:** Cumulative `current_time += timedelta(milliseconds=tick_interval_ms)` on each advance() call
+**Reasoning:** IEEE 754 floating-point addition is not associative — after 100,000 additions of 1.0ms, the accumulated error is 10–50 microseconds depending on platform. Multiplying from a fixed integer tick_count keeps every timestamp exact. This matters for fault window boundary checks: a drifted clock could include or exclude events at the boundary of a FaultSpec's start/end offsets, corrupting ground-truth label counts.
+
+## ADR-006: SimulatorEngine pre-generates all events before yielding by tick
+**Date:** 2026-03-16
+**Decision:** Generate all events for the full simulation window upfront, sort globally, then yield tick by tick
+**Alternatives considered:** Generate events per tick by calling PoissonEventGenerator.generate() once per tick per stage
+**Reasoning:** Per-tick generation would restart the Poisson inter-arrival chain at each tick boundary, introducing artificial clustering at tick edges (all events generated within a tick start from time=tick_start). Pre-generating and filtering to the window preserves the continuous Poisson inter-arrival statistics that CUSUM and EWMA detectors depend on for accurate baseline fitting.
+
+## ADR-007: Stage RNGs derived via SeedSequence.spawn() rather than counter-incremented seeds
+**Date:** 2026-03-16
+**Decision:** Derive per-stage RNGs using `np.random.SeedSequence.spawn(n_stages)` from the master seed
+**Alternatives considered:** `np.random.default_rng(master_seed + stage_index)` — offset seeds per stage
+**Reasoning:** Offset seeds are not statistically independent — seeds that differ by small integers can produce correlated sequences for certain numpy RNG algorithms. `SeedSequence.spawn()` is numpy's documented API for producing statistically independent child generators. Additionally, offset seeds would change every stage's RNG when a stage is inserted at a lower index, whereas spawn() produces child sequences that are stable relative to the master seed regardless of how many children are spawned.
+
 ## ADR-003: Dimensionless magnitude parameter across all fault types
 **Date:** 2026-03-16
 **Decision:** Use a single `magnitude` float on `FaultSpec` whose interpretation is fault-type-specific rather than defining a typed parameter class per fault type

@@ -44,10 +44,10 @@ Goal: inject six fault types into the workload stream so every detector and caus
 
 Goal: make the simulator deterministic and replayable so test scenarios are reproducible across machines and CI runs.
 
-- [ ] Implement `SimulationClock` — tick-based virtual clock; all generators and injectors advance by `tick_interval_ms` per step, never using wall time
-- [ ] Build `SimulatorEngine` — composes `WorkloadProfile`, `PipelineTopologyGraph`, `FaultInjector`, and `SimulationClock` into a single `run(n_ticks)` loop
-- [ ] Add `ScenarioConfig` — a single YAML-driven config that seeds the RNG, sets topology, workload, and fault schedule; same config always produces identical output
-- [ ] Write integration test: run two identical `ScenarioConfig` instances with the same seed, assert byte-for-byte identical event streams
+- [x] Implement `SimulationClock` — tick-based virtual clock; all generators and injectors advance by `tick_interval_ms` per step, never using wall time
+- [x] Build `SimulatorEngine` — composes `WorkloadProfile`, `PipelineTopologyGraph`, `FaultInjector`, and `SimulationClock` into a single `run(n_ticks)` loop
+- [x] Add `ScenarioConfig` — a single YAML-driven config that seeds the RNG, sets topology, workload, and fault schedule; same config always produces identical output
+- [x] Write integration test: run two identical `ScenarioConfig` instances with the same seed, assert byte-for-byte identical event streams
 
 ---
 

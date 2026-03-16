@@ -1,0 +1,33 @@
+# Example QueryLens scenario: latency spike at the Postgres source.
+#
+# This scenario runs a 120-tick simulation (2 minutes at 1s per tick) against the
+# standard two-source topology. A latency spike fault fires at source_postgres
+# between t=30s and t=90s at 5× magnitude, giving the CUSUM and EWMA detectors
+# a 60-second fault window with ground-truth labels to validate against.
+#
+# Any two runs with the same rng_seed produce byte-for-byte identical event streams.
+
+scenario:
+  name: latency_spike_source_postgres
+  rng_seed: 42
+  simulation_start: "2024-01-01T00:00:00"
+
+clock:
+  tick_interval_ms: 1000.0
+
+topology:
+  path: topology_example.yaml
+
+workload:
+  arrival_rate_lambda: 5.0
+  payload_mean_bytes: 4096.0
+  payload_std_bytes: 1024.0
+  max_concurrency: 8
+
+faults:
+  - fault_type: latency_spike
+    target_stage_id: source_postgres
+    start_offset_s: 30.0
+    duration_s: 60.0
+    magnitude: 5.0
+    seed: 7
