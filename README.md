@@ -34,7 +34,7 @@ The system is split into independent layers. Each one can be tested in isolation
 |---|---|---|
 | 1 | `PipelineEvent` + `PoissonEventGenerator` | Done |
 | 2 | `PipelineTopologyGraph` + `TopologyLoader` | Done |
-| 3 | `FaultInjector` + `FaultSchedule` | Pending |
+| 3 | `FaultInjector` + `FaultSchedule` | Done |
 | 4 | `SimulatorEngine` + `ScenarioConfig` | Pending |
 | 5 | PostgreSQL schema + Alembic migrations | Pending |
 | 6 | `RedpandaProducer` + serialization | Pending |
@@ -209,6 +209,58 @@ candidates = graph.ancestors("sink_warehouse")
 
 ---
 
+### Milestone 3: FaultInjector and FaultSchedule
+
+**`simulator/fault_injection.py`**
+
+`FaultSpec` is a pure value object that describes one fault: which stage to target, when to start (as a second offset from simulation start), how long it lasts, and how severe it is. `magnitude` is intentionally dimensionless — its interpretation is fault-type-specific rather than having a separate parameter class per fault type. For `latency_spike` it is a multiplier; for `dropped_connection` and `error_burst` it is a probability; for `schema_drift` it is a row-loss fraction; for `partition_skew` and `throughput_collapse` it is a scale factor.
+
+`FaultSchedule` couples the simulation start timestamp with the ordered list of specs. Every active-window calculation needs both; keeping them co-located prevents callers from passing a mismatched start time and silently activating faults at the wrong offsets.
+
+`FaultInjector` pre-seeds one `np.random.Generator` per `FaultSpec` at construction time. Seeding inside `inject()` would reset RNG state on every call, turning a 50% drop rate into 0% or 100% depending on a single draw. Pre-seeded stateful generators advance independently per event, producing the correct probabilistic distribution across the full fault window.
+
+The six fault types and their observable signatures:
+
+| Fault type | What changes | Signature detectors measure |
+|---|---|---|
+| `latency_spike` | `latency_ms × magnitude ± 20% jitter` | p99 latency elevation |
+| `dropped_connection` | `status=error`, `row_count=0`, `payload_bytes=0`, `latency_ms × 3` | error rate + throughput collapse |
+| `schema_drift` | `row_count × (1 − magnitude)`, `status=schema_error` | mean row count reduction |
+| `partition_skew` | `payload_bytes × magnitude`, `latency_ms × magnitude` | payload volume + latency elevation |
+| `throughput_collapse` | `row_count ÷ magnitude` (floor 1) | mean row count collapse |
+| `error_burst` | `status=error` at rate `magnitude`, data preserved | error rate spike with stable throughput |
+
+`schema_drift` and `error_burst` produce distinct signatures even though both raise error rates: `schema_drift` simultaneously collapses `row_count` while `error_burst` leaves data volumes intact. The causal engine uses this difference to distinguish a schema incompatibility from a downstream processing failure.
+
+`fault_label` is set on every event inside the fault window, including events that probabilistic faults chose not to mutate. The label is ground truth about the window, not the per-event outcome. A detector that misses a fault-window event is a false negative even if that event kept its normal status.
+
+```python
+from datetime import datetime
+from simulator.fault_injection import FaultSpec, FaultSchedule, FaultInjector
+
+schedule = FaultSchedule(
+    simulation_start=datetime(2024, 1, 1),
+    fault_specs=[
+        FaultSpec(
+            fault_type="latency_spike",
+            target_stage_id="source_postgres",
+            start_offset_s=30.0,
+            duration_s=60.0,
+            magnitude=5.0,
+            seed=42,
+        ),
+    ],
+)
+injector = FaultInjector(schedule)
+
+for event in event_stream:
+    labelled_event = injector.inject(event)
+```
+
+**Tests** in `tests/test_fault_injection.py`: 11 tests covering object identity for fault-free events, fault_label coverage across the full window, cross-stage isolation, unknown fault_type rejection, per-fault statistical signatures (latency p99, error rate, row count reduction, payload inflation), and inclusive boundary behaviour at `start_offset_s`.
+
+---
+
 ## Repository layout
 
 ```
@@ -216,7 +268,8 @@ QueryLens/
 ├── simulator/
 │   ├── models.py           PipelineEvent dataclass
 │   ├── topology.py         PipelineStage, PipelineTopologyGraph, TopologyLoader
-│   └── workload.py         WorkloadProfile, PoissonEventGenerator
+│   ├── workload.py         WorkloadProfile, PoissonEventGenerator
+│   └── fault_injection.py  FaultSpec, FaultSchedule, FaultInjector
 ├── ingestion/              Milestones 6 to 8
 ├── detection/              Milestones 9 to 14
 ├── causal/                 Milestones 15 to 18
@@ -224,8 +277,9 @@ QueryLens/
 ├── api/                    Milestones 23 to 26
 ├── dashboard/              Milestones 27 to 29
 ├── tests/
-│   ├── test_workload.py    Milestone 1 tests
-│   └── test_topology.py    Milestone 2 tests
+│   ├── test_workload.py         Milestone 1 tests
+│   ├── test_topology.py         Milestone 2 tests
+│   └── test_fault_injection.py  Milestone 3 tests
 ├── config/
 │   └── topology_example.yaml
 ├── docker-compose.yml
