@@ -11,6 +11,7 @@
 - Never batch unrelated files into one commit
 - Each commit message must read like an engineering journal entry (e.g. "add CUSUM detector — chose this over EWMA because it catches gradual drift without tuning a decay parameter")
 - Commits should be small and intentional, one logical unit at a time
+- Within a milestone, commit and push every 2 sub-parts completed — do not wait until the full milestone is done
 
 ## Architecture Decisions
 
