@@ -37,7 +37,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 3 | `FaultInjector` + `FaultSchedule` | Done |
 | 4 | `SimulatorEngine` + `ScenarioConfig` | Done |
 | 5 | PostgreSQL schema + Alembic migrations | Done |
-| 6 | `RedpandaProducer` + serialization | Pending |
+| 6 | `RedpandaProducer` + serialization | Done |
 | 7 | `MetricConsumer` + `IngestionWorker` | Pending |
 | 8 | Structured logging + Prometheus metrics | Pending |
 | 9 | `SlidingWindowAggregator` | Pending |
@@ -313,6 +313,30 @@ All tests run against a real `postgres:16-alpine` container via testcontainers. 
 
 ---
 
+### Milestone 6: RedpandaProducer and MetricEventSerializer
+
+**`ingestion/serializer.py`**
+
+`MetricEventSerializer` encodes `PipelineEvent` to UTF-8 JSON bytes and decodes back. Every message carries a `schema_version: 1` field so the consumer can detect format changes without coordinating a simultaneous deploy. The alternative — versioning via Kafka topic name (`pipeline.metrics.v2`) — forces a new consumer group and full replay every time the schema evolves. Field-level versioning lets the consumer decide compatibility independently.
+
+`datetime` fields are encoded as ISO 8601 strings with explicit UTC offset rather than Unix timestamps. Unix timestamps require the reader to know the precision (seconds vs milliseconds vs microseconds), which has caused silent data loss when that assumption drifted between producer and consumer versions.
+
+**`ingestion/producer.py`**
+
+`ProducerHealthCheck` tracks delivery outcomes in thread-safe integer counters via a `threading.Lock`. librdkafka's delivery callbacks run on an internal thread separate from the producer thread — without the lock, the counters would be subject to lost-update races. The `on_delivery(err, msg)` signature is the confluent_kafka delivery callback contract; `failed_delivery_count` and `successful_delivery_count` are the Prometheus-ready properties.
+
+`RedpandaProducer` wraps `confluent_kafka.Producer` with `acks=all`, `retries=5`, `enable.idempotence=True`, and `linger.ms=5`. Idempotence with `acks=all` and retries guarantees exactly-once delivery at the producer level — without idempotence, a retry after a lost ack would produce a duplicate. `linger.ms=5` batches messages that arrive within 5ms, halving round-trip count at 5,000 events/sec with negligible latency cost at detection-window granularity. `poll(0)` is called after every `produce()` so delivery callbacks fire in near-real-time rather than only at `flush()`.
+
+`stage_id` is used as the Kafka message key so all events from the same pipeline stage land on the same partition, preserving per-stage event ordering for the sliding window aggregator in M9.
+
+**`tests/test_producer.py`** — 14 tests across three groups:
+
+- `TestMetricEventSerializer`: round-trip field preservation, nullable fields, schema_version presence, wrong-version rejection, invalid JSON rejection, missing field rejection — all without a broker
+- `TestProducerHealthCheck`: delivery counter routing for success and failure callbacks, total count
+- `TestRedpandaProducerIntegration`: 1,000 events produced to a `confluentinc/cp-kafka:7.6.0` KRaft container, zero delivery failures, all 1,000 consumed back, all deserialize cleanly, events distributed across multiple partitions confirming key routing
+
+---
+
 ## Repository layout
 
 ```
@@ -325,6 +349,8 @@ QueryLens/
 │   └── engine.py           SimulationClock, SimulatorEngine, ScenarioConfig
 ├── ingestion/
 │   ├── models.py           PipelineMetric, AnomalyEvent, FaultLocalization ORM models
+│   ├── serializer.py       MetricEventSerializer — JSON wire format with schema_version
+│   ├── producer.py         RedpandaProducer, ProducerHealthCheck
 │   └── __init__.py
 ├── migrations/
 │   ├── env.py              Alembic env — injects DATABASE_URL from environment
@@ -341,7 +367,8 @@ QueryLens/
 │   ├── test_topology.py         Milestone 2 tests
 │   ├── test_fault_injection.py  Milestone 3 tests
 │   ├── test_engine.py           Milestone 4 integration tests
-│   └── test_migration.py        Milestone 5 migration smoke test (requires Docker)
+│   ├── test_migration.py        Milestone 5 migration smoke test (requires Docker)
+│   └── test_producer.py         Milestone 6 producer integration test (requires Docker)
 ├── config/
 │   ├── topology_example.yaml
 │   └── scenario_example.yaml

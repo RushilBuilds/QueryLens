@@ -68,10 +68,10 @@ Goal: establish the PostgreSQL schema before writing a single byte of ingestion 
 
 Goal: get simulator output onto the Redpanda topic reliably, with serialization that the consumer can version independently.
 
-- [ ] Implement `MetricEventSerializer` — serializes `PipelineEvent` to JSON with a `schema_version` field so consumer can handle future schema evolution
-- [ ] Build `RedpandaProducer` — wraps `confluent_kafka.Producer`, configures `acks=all` and `retries=5`, publishes to `pipeline.metrics` topic
-- [ ] Add `ProducerHealthCheck` — tracks per-topic delivery callbacks; exposes `failed_deliveries` counter for Prometheus
-- [ ] Write integration test: produce 1,000 events to a `testcontainers` Redpanda instance, assert all offsets committed and no delivery errors
+- [x] Implement `MetricEventSerializer` — serializes `PipelineEvent` to JSON with a `schema_version` field so consumer can handle future schema evolution
+- [x] Build `RedpandaProducer` — wraps `confluent_kafka.Producer`, configures `acks=all` and `retries=5`, publishes to `pipeline.metrics` topic
+- [x] Add `ProducerHealthCheck` — tracks per-topic delivery callbacks; exposes `failed_deliveries` counter for Prometheus
+- [x] Write integration test: produce 1,000 events to a `testcontainers` Redpanda instance, assert all offsets committed and no delivery errors
 
 ---
 

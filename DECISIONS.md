@@ -4,6 +4,24 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-011: JSON wire format with schema_version over Avro or MessagePack
+**Date:** 2026-03-20
+**Decision:** Encode `PipelineEvent` as UTF-8 JSON with a `schema_version` integer field
+**Alternatives considered:** Avro with Confluent Schema Registry; MessagePack binary encoding
+**Reasoning:** At single-digit thousands of events per second, JSON throughput is not a bottleneck. Avro requires a schema registry — an additional infrastructure dependency that adds operational complexity and a potential single point of failure for the ingestion path. MessagePack saves ~30% payload size but produces non-human-readable DLQ messages, which is the wrong trade-off when DLQ debuggability is more operationally valuable than the bandwidth savings. `schema_version` enables consumer-side compatibility checks without topic proliferation.
+
+## ADR-012: confluent_kafka idempotent producer with acks=all and retries=5
+**Date:** 2026-03-20
+**Decision:** Configure `RedpandaProducer` with `enable.idempotence=True`, `acks=all`, `retries=5`
+**Alternatives considered:** `acks=1` (leader-only acknowledgement); `acks=0` (fire-and-forget); no retries
+**Reasoning:** `acks=all` ensures all in-sync replicas acknowledge before the producer considers a message delivered — a leader crash after `acks=1` would lose any messages not yet replicated to followers. `enable.idempotence` with retries guarantees that a retry caused by a lost ack does not produce a duplicate record in the partition. The cost is ~10% throughput reduction vs `acks=1`; the gain is a delivery guarantee the downstream detection layer can rely on.
+
+## ADR-013: stage_id as Kafka message key for per-stage partition affinity
+**Date:** 2026-03-20
+**Decision:** Encode `event.stage_id` as the Kafka message key in `RedpandaProducer.publish()`
+**Alternatives considered:** No key (round-robin partition assignment); random UUID key; hash of (stage_id, event_time)
+**Reasoning:** The sliding window aggregator (M9) reads metrics per stage and needs them in time order within each stage. With round-robin assignment, events from the same stage land on different partitions and arrive out of order at the consumer — requiring an additional sort step on every aggregation window. Keying by stage_id routes all events for a stage to the same partition, preserving order without any consumer-side sorting. A composite key (stage_id, event_time) would further sub-partition within a stage but offers no ordering benefit since partition assignment is hash-based, not range-based.
+
 ## ADR-008: pipeline_metrics uses PARTITION BY RANGE on event_time with pre-created monthly child tables
 **Date:** 2026-03-20
 **Decision:** Declare `pipeline_metrics` as a range-partitioned table with 12 monthly partitions for 2024 plus a DEFAULT partition, created via raw SQL in the Alembic migration
