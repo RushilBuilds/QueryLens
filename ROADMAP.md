@@ -79,10 +79,10 @@ Goal: get simulator output onto the Redpanda topic reliably, with serialization 
 
 Goal: pull events off the topic and write them to PostgreSQL with at-least-once delivery guarantees and no silent data loss.
 
-- [ ] Implement `MetricConsumer` — Redpanda consumer group on `pipeline.metrics`; commits offset only after successful batch write, never before
-- [ ] Build `IngestionWorker` — async batch writer; flushes when batch reaches `batch_size` records OR `flush_interval_s` seconds elapse, whichever comes first
-- [ ] Add dead-letter handling — events that fail deserialization or validation are written to `pipeline.metrics.dlq` topic with error context, not silently dropped
-- [ ] Write integration test: produce events with one malformed record; assert all valid records land in PostgreSQL and malformed record lands in DLQ topic
+- [x] Implement `MetricConsumer` — Redpanda consumer group on `pipeline.metrics`; commits offset only after successful batch write, never before
+- [x] Build `IngestionWorker` — async batch writer; flushes when batch reaches `batch_size` records OR `flush_interval_s` seconds elapse, whichever comes first
+- [x] Add dead-letter handling — events that fail deserialization or validation are written to `pipeline.metrics.dlq` topic with error context, not silently dropped
+- [x] Write integration test: produce events with one malformed record; assert all valid records land in PostgreSQL and malformed record lands in DLQ topic
 
 ---
 

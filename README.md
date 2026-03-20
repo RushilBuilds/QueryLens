@@ -38,7 +38,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 4 | `SimulatorEngine` + `ScenarioConfig` | Done |
 | 5 | PostgreSQL schema + Alembic migrations | Done |
 | 6 | `RedpandaProducer` + serialization | Done |
-| 7 | `MetricConsumer` + `IngestionWorker` | Pending |
+| 7 | `MetricConsumer` + `IngestionWorker` | Done |
 | 8 | Structured logging + Prometheus metrics | Pending |
 | 9 | `SlidingWindowAggregator` | Pending |
 | 10 | `SeasonalBaselineModel` | Pending |
@@ -337,6 +337,34 @@ All tests run against a real `postgres:16-alpine` container via testcontainers. 
 
 ---
 
+### Milestone 7: MetricConsumer and IngestionWorker
+
+**`ingestion/consumer.py`**
+
+`ConsumerConfig` enforces `enable.auto.commit: false` unconditionally. Auto-commit advances the offset on a timer regardless of whether the DB write succeeded — a transient PostgreSQL failure followed by an auto-commit would silently drop the batch on restart. Manual commit is the only mechanism that guarantees the offset advances only after the write confirms.
+
+`MetricConsumer.poll_batch()` polls up to `max_records` messages in a loop: the first poll uses a blocking timeout so the worker can sleep efficiently on a quiet topic; subsequent polls use `timeout=0` to drain whatever is already buffered without adding latency. Messages that fail deserialization are routed to `<topic>.dlq` via a separate low-acks producer immediately, then added to the batch as invalid entries so their offset still advances (preventing infinite replay of a permanently malformed message).
+
+`commit_batch()` stores offsets for all messages — valid and invalid — then issues a single synchronous broker commit. Storing offsets for invalid messages is correct because the DLQ has already received them; replaying them on restart would re-write to the DLQ without recovering anything.
+
+**`ingestion/worker.py`**
+
+`IngestionWorker` drives a dual-trigger flush: flush when `batch_size` records accumulate OR when `flush_interval_s` seconds elapse with pending records. A batch-size-only trigger leaves records stranded on a quiet topic; an interval-only trigger creates an unbounded replay window on crash during a burst. The dual trigger bounds both latency and crash-replay volume.
+
+`run_once()` is the public step method rather than a blocking `run()` loop — tests drive it tick-by-tick without threads. The write → commit ordering is strict: `session.commit()` before `consumer.commit_batch()`. A crash between them replays the batch from the last committed Kafka offset, producing duplicate DB rows that GENERATED ALWAYS AS IDENTITY absorbs with new IDs and that aggregate detectors tolerate.
+
+`_write_to_db()` uses `session.add_all()` which SQLAlchemy batches into a single `executemany()` at flush time — roughly 50× faster than 500 individual INSERTs at the batch sizes we use.
+
+**`tests/test_ingestion_worker.py`** — 6 tests:
+
+- `TestWorkerConfig`: rejects zero batch_size and negative flush_interval at construction time
+- `TestIngestionWorkerHappyPath`: 50 events produced → all 50 land in `pipeline_metrics`; probe consumer on same group_id sees no messages after close, confirming offset was committed
+- `TestDLQRouting`: 10 valid + 1 malformed interleaved → 10 rows in PostgreSQL, 1 envelope in DLQ topic with correct `source_topic`, `source_partition`, `source_offset`, and `error` fields
+
+Each test class uses its own Kafka topic to prevent cross-test offset contamination within the module-scoped broker.
+
+---
+
 ## Repository layout
 
 ```
@@ -351,6 +379,8 @@ QueryLens/
 │   ├── models.py           PipelineMetric, AnomalyEvent, FaultLocalization ORM models
 │   ├── serializer.py       MetricEventSerializer — JSON wire format with schema_version
 │   ├── producer.py         RedpandaProducer, ProducerHealthCheck
+│   ├── consumer.py         MetricConsumer, ConsumerConfig, DLQ routing
+│   ├── worker.py           IngestionWorker (dual-trigger batch flush)
 │   └── __init__.py
 ├── migrations/
 │   ├── env.py              Alembic env — injects DATABASE_URL from environment
@@ -368,7 +398,8 @@ QueryLens/
 │   ├── test_fault_injection.py  Milestone 3 tests
 │   ├── test_engine.py           Milestone 4 integration tests
 │   ├── test_migration.py        Milestone 5 migration smoke test (requires Docker)
-│   └── test_producer.py         Milestone 6 producer integration test (requires Docker)
+│   ├── test_producer.py         Milestone 6 producer integration test (requires Docker)
+│   └── test_ingestion_worker.py Milestone 7 consumer/worker integration test (requires Docker)
 ├── config/
 │   ├── topology_example.yaml
 │   └── scenario_example.yaml

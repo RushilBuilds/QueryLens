@@ -4,6 +4,24 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-014: Manual Kafka offset commit — commit only after successful PostgreSQL write
+**Date:** 2026-03-20
+**Decision:** Disable `enable.auto.commit` and commit offsets synchronously via `consumer.commit(asynchronous=False)` only after `session.commit()` succeeds
+**Alternatives considered:** `enable.auto.commit=true` (commit on timer); async manual commit (commit without waiting for broker ack)
+**Reasoning:** Auto-commit advances the offset on a wall-clock interval regardless of write success. A PostgreSQL failure between auto-commits silently drops the unwritten batch — on restart the consumer resumes from the committed offset, skipping those records permanently. Manual synchronous commit after write gives us at-least-once delivery: on crash-restart, the uncommitted batch replays from the last committed Kafka offset. Duplicate rows from replay are tolerable (GENERATED ALWAYS AS IDENTITY assigns new IDs; aggregates are robust to occasional duplicates) whereas silent data loss is not.
+
+## ADR-015: Dual-trigger flush (batch_size OR flush_interval_s) in IngestionWorker
+**Date:** 2026-03-20
+**Decision:** Flush when `len(pending) >= batch_size` OR when `flush_interval_s` seconds have elapsed with at least one pending record
+**Alternatives considered:** Batch-size-only flush; interval-only flush; per-record commit
+**Reasoning:** Batch-size-only flush strands records on a quiet topic indefinitely — if the topic receives 499 events and goes quiet, no flush fires until the 500th event arrives, adding unbounded latency to the detection layer. Interval-only flush creates a large crash-replay window during a burst (500ms × 5,000 events/sec = 2,500 events replayed on crash). Per-record commit eliminates batching entirely and is 500× slower than bulk INSERT. The dual trigger bounds latency to `flush_interval_s` and bounds replay volume to `batch_size × records/s × flush_interval_s`.
+
+## ADR-016: DLQ offset advances alongside valid offsets — malformed messages are not replayed
+**Date:** 2026-03-20
+**Decision:** Store and commit the offset for a malformed message after routing it to the DLQ, treating it identically to a valid message for offset advancement purposes
+**Alternatives considered:** Skip offset commit for malformed messages (replay on restart); route to DLQ and crash (force operator intervention)
+**Reasoning:** Not advancing the offset for a malformed message would cause infinite replay: on every restart, the consumer re-reads the same malformed record, re-routes it to DLQ, and never makes progress past that offset. The DLQ already has the record with full error context; replaying it adds duplicate DLQ entries without recovering anything. Crashing on malformed messages would halt the ingestion pipeline entirely for a single bad producer record, which is too brittle for a production system.
+
 ## ADR-011: JSON wire format with schema_version over Avro or MessagePack
 **Date:** 2026-03-20
 **Decision:** Encode `PipelineEvent` as UTF-8 JSON with a `schema_version` integer field
