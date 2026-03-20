@@ -28,3 +28,4 @@ class PipelineEvent:
     payload_bytes: int
     status: str
     fault_label: Optional[str]
+    trace_id: Optional[str] = None
