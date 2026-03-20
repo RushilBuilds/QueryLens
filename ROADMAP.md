@@ -57,10 +57,10 @@ Goal: make the simulator deterministic and replayable so test scenarios are repr
 
 Goal: establish the PostgreSQL schema before writing a single byte of ingestion code — schema changes are the hardest things to reverse.
 
-- [ ] Define `PipelineMetric` SQLAlchemy model — columns: `id`, `stage_id`, `event_time`, `latency_ms`, `row_count`, `payload_bytes`, `status`, `fault_label`, `trace_id`
-- [ ] Write Alembic `initial_schema` migration — creates `pipeline_metrics` table partitioned by `event_time` (monthly range partitions)
-- [ ] Add `AnomalyEvent` and `FaultLocalization` table stubs in the same migration — empty now, filled in later phases
-- [ ] Write a migration smoke test: apply migration against a real PostgreSQL container (via `testcontainers`), insert one row, assert round-trip
+- [x] Define `PipelineMetric` SQLAlchemy model — columns: `id`, `stage_id`, `event_time`, `latency_ms`, `row_count`, `payload_bytes`, `status`, `fault_label`, `trace_id`
+- [x] Write Alembic `initial_schema` migration — creates `pipeline_metrics` table partitioned by `event_time` (monthly range partitions)
+- [x] Add `AnomalyEvent` and `FaultLocalization` table stubs in the same migration — empty now, filled in later phases
+- [x] Write a migration smoke test: apply migration against a real PostgreSQL container (via `testcontainers`), insert one row, assert round-trip
 
 ---
 

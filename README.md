@@ -36,7 +36,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 2 | `PipelineTopologyGraph` + `TopologyLoader` | Done |
 | 3 | `FaultInjector` + `FaultSchedule` | Done |
 | 4 | `SimulatorEngine` + `ScenarioConfig` | Done |
-| 5 | PostgreSQL schema + Alembic migrations | Pending |
+| 5 | PostgreSQL schema + Alembic migrations | Done |
 | 6 | `RedpandaProducer` + serialization | Pending |
 | 7 | `MetricConsumer` + `IngestionWorker` | Pending |
 | 8 | Structured logging + Prometheus metrics | Pending |
@@ -289,6 +289,30 @@ assert events_a == events_b
 
 ---
 
+### Milestone 5: PipelineMetric schema and Alembic migration
+
+**`ingestion/models.py`**
+
+Three SQLAlchemy ORM models declared against the PostgreSQL schema:
+
+`PipelineMetric` maps to the partitioned parent table `pipeline_metrics`. The composite primary key `(id, event_time)` is a PostgreSQL partitioning constraint — every unique or primary key on a range-partitioned table must include all partition key columns. `id` uses `GENERATED ALWAYS AS IDENTITY` so the database owns sequencing rather than relying on application-side UUID generation, which avoids hot-spot contention at high insert rates. `trace_id` is stored as `String(32)` rather than `UUID` because OpenTelemetry trace IDs are 128-bit hex strings — forcing them through Postgres's uuid type would require dash-formatting, adding a serialization step for a field we only ever filter on.
+
+`AnomalyEvent` and `FaultLocalization` are stub models with only identity and timestamp columns. Their full schemas depend on decisions made in the detection and causal layers; declaring those columns now would require a corrective migration once the detection API is finalized.
+
+**`migrations/versions/001_initial_schema.py`**
+
+Uses raw SQL via `op.execute()` rather than `op.create_table()` for `pipeline_metrics` because SQLAlchemy's DDL compiler does not emit `PARTITION BY RANGE` — it has no first-class concept of declarative partitioning at the DDL level. Raw SQL gives full control over the partition declaration and the child `PARTITION OF ... FOR VALUES FROM/TO` clauses.
+
+12 monthly child partitions for 2024 are pre-created (the scenario fixtures use `2024-01-01` as simulation start), plus a `DEFAULT` partition to catch any out-of-range inserts rather than failing them silently. A `(stage_id, event_time)` compound index on the parent table is automatically propagated to all child partitions by PostgreSQL's partitioned index infrastructure. A sparse partial index on `fault_label WHERE fault_label IS NOT NULL` covers ground-truth recall queries without paying maintenance overhead on the majority of null rows.
+
+**`tests/test_migration.py`**
+
+10 tests across two groups. `TestMigrationApplied` verifies schema structure: parent table exists, 13 partitions created (12 monthly + DEFAULT), stub tables exist, compound index exists. `TestPipelineMetricRoundTrip` verifies ORM semantics: full insert/select round-trip, field-level type preservation for `latency_ms` (float precision), nullable `fault_label`, and partition routing (row lands in `pipeline_metrics_2024_01`, not DEFAULT).
+
+All tests run against a real `postgres:16-alpine` container via testcontainers. In-memory or SQLite fixtures are not used — SQLite does not support `PARTITION BY RANGE`, `GENERATED ALWAYS AS IDENTITY`, or partial indexes with `WHERE` clauses, so any fixture that accepted the DDL would be lying about compatibility.
+
+---
+
 ## Repository layout
 
 ```
@@ -299,7 +323,14 @@ QueryLens/
 │   ├── workload.py         WorkloadProfile, PoissonEventGenerator
 │   ├── fault_injection.py  FaultSpec, FaultSchedule, FaultInjector
 │   └── engine.py           SimulationClock, SimulatorEngine, ScenarioConfig
-├── ingestion/              Milestones 6 to 8
+├── ingestion/
+│   ├── models.py           PipelineMetric, AnomalyEvent, FaultLocalization ORM models
+│   └── __init__.py
+├── migrations/
+│   ├── env.py              Alembic env — injects DATABASE_URL from environment
+│   ├── script.py.mako      migration template
+│   └── versions/
+│       └── 001_initial_schema.py   partitioned pipeline_metrics + stub tables
 ├── detection/              Milestones 9 to 14
 ├── causal/                 Milestones 15 to 18
 ├── healing/                Milestones 19 to 22
@@ -309,7 +340,8 @@ QueryLens/
 │   ├── test_workload.py         Milestone 1 tests
 │   ├── test_topology.py         Milestone 2 tests
 │   ├── test_fault_injection.py  Milestone 3 tests
-│   └── test_engine.py           Milestone 4 integration tests
+│   ├── test_engine.py           Milestone 4 integration tests
+│   └── test_migration.py        Milestone 5 migration smoke test (requires Docker)
 ├── config/
 │   ├── topology_example.yaml
 │   └── scenario_example.yaml
