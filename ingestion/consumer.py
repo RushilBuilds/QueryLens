@@ -5,10 +5,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterator, List, Optional, Tuple
 
+import structlog
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message, Producer
 
+from ingestion.observability import DLQ_EVENTS
 from ingestion.serializer import MetricEventSerializer, SerializationError
 from simulator.models import PipelineEvent
+
+_log = structlog.get_logger(__name__)
 
 # DLQ topic receives any message that fails deserialization or schema validation.
 # I'm using a fixed suffix convention (.dlq) rather than a separate config
@@ -156,6 +160,18 @@ class MetricConsumer:
                     offset=msg.offset(),
                 ))
 
+        valid_count = sum(1 for m in batch if m.is_valid)
+        dlq_count = len(batch) - valid_count
+        if batch:
+            _log.info(
+                "poll_batch_complete",
+                batch_size=len(batch),
+                valid=valid_count,
+                dlq=dlq_count,
+                first_offset=batch[0].offset,
+                last_offset=batch[-1].offset,
+            )
+
         return batch
 
     def _send_to_dlq(
@@ -182,6 +198,13 @@ class MetricConsumer:
             value=envelope,
         )
         self._dlq_producer.poll(0)
+        DLQ_EVENTS.inc()
+        _log.warning(
+            "dlq_routed",
+            source_partition=partition,
+            source_offset=offset,
+            error=error_context[:200],
+        )
 
     def commit_batch(self, batch: List[ConsumedMessage]) -> None:
         """
@@ -206,6 +229,7 @@ class MetricConsumer:
                 )
             ])
         self._consumer.commit(asynchronous=False)
+        _log.debug("offsets_committed", batch_size=len(batch))
 
     def flush_dlq(self, timeout_s: float = 5.0) -> None:
         """Flush any pending DLQ messages before closing."""

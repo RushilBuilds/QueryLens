@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import time
+from collections import Counter as _StageCounter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import List, Optional
 
+import structlog
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from ingestion.consumer import ConsumedMessage, ConsumerConfig, MetricConsumer
 from ingestion.models import PipelineMetric
+from ingestion.observability import CONSUMER_LAG, RECORDS_CONSUMED, RECORDS_WRITTEN, WRITE_LATENCY
+
+_log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -89,14 +95,40 @@ class IngestionWorker:
         valid = [m for m in self._pending if m.is_valid]
         invalid_count = len(self._pending) - len(valid)
 
+        # I'm computing per-stage counts before the DB write so the Prometheus
+        # labels are available even if the write raises. RECORDS_CONSUMED reflects
+        # what was parsed off the wire; RECORDS_WRITTEN reflects what landed in
+        # PostgreSQL. The delta between them is the transient write failure rate.
+        stage_counts = _StageCounter(
+            m.event.stage_id for m in valid if m.event is not None
+        )
+        for stage_id, cnt in stage_counts.items():
+            RECORDS_CONSUMED.labels(stage_id=stage_id).inc(cnt)
+
+        # Update consumer lag: age of the oldest event per stage in this batch.
+        now_utc = datetime.now(tz=timezone.utc)
+        for stage_id, oldest_event_time in _oldest_event_time_per_stage(valid).items():
+            lag_s = (now_utc - oldest_event_time).total_seconds()
+            CONSUMER_LAG.labels(stage_id=stage_id).set(max(0.0, lag_s))
+
         if valid:
             self._write_to_db(valid)
 
         self._consumer.commit_batch(self._pending)
+
+        for stage_id, cnt in stage_counts.items():
+            RECORDS_WRITTEN.labels(stage_id=stage_id).inc(cnt)
+
         self._total_written += len(valid)
         self._total_dlq += invalid_count
         self._pending.clear()
         self._last_flush_time = time.monotonic()
+        _log.info(
+            "batch_flushed",
+            valid=len(valid),
+            dlq=invalid_count,
+            total_written=self._total_written,
+        )
 
     def _write_to_db(self, messages: List[ConsumedMessage]) -> None:
         """
@@ -129,9 +161,13 @@ class IngestionWorker:
             for m in messages
             if m.event is not None
         ]
+        t0 = time.monotonic()
         with Session(self._engine) as session:
             session.add_all(orm_rows)
             session.commit()
+        elapsed = time.monotonic() - t0
+        WRITE_LATENCY.observe(elapsed)
+        _log.info("db_write_complete", n_rows=len(orm_rows), latency_s=round(elapsed, 4))
 
     def run_once(self) -> int:
         """
@@ -174,3 +210,24 @@ class IngestionWorker:
         self.flush_remaining()
         self._consumer.close()
         self._engine.dispose()
+
+
+def _oldest_event_time_per_stage(
+    messages: List[ConsumedMessage],
+) -> dict:
+    """
+    I'm computing the oldest event_time per stage rather than a single global
+    oldest time because CONSUMER_LAG is a per-stage gauge. A single slow stage
+    dragging down a global gauge would mask that the other stages are current —
+    the per-stage breakdown lets the Prometheus alert rule target the specific
+    stage that is lagging, not fire a blanket alarm.
+    """
+    oldest: dict = {}
+    for m in messages:
+        if m.event is None:
+            continue
+        stage = m.event.stage_id
+        t = m.event.event_time
+        if stage not in oldest or t < oldest[stage]:
+            oldest[stage] = t
+    return oldest
