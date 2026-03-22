@@ -42,7 +42,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 8 | Structured logging + Prometheus metrics | Done |
 | 9 | `SlidingWindowAggregator` | Done |
 | 10 | `SeasonalBaselineModel` | Done |
-| 11 | `CUSUMDetector` | Pending |
+| 11 | `CUSUMDetector` | Complete |
 | 12 | `EWMADetector` | Pending |
 | 13 | `AnomalyEventBus` | Pending |
 | 14 | Detection accuracy benchmarks | Pending |
@@ -380,6 +380,31 @@ Adds the `stage_baselines` table with a `UNIQUE (stage_id, hour_of_week, metric)
 `BaselineStore` uses `time.monotonic()` for TTL tracking (never goes backwards, immune to NTP jumps and DST transitions). `get_model()` re-fits lazily on first call and when TTL expires — no background thread needed since the detection loop is synchronous and the fit takes <100ms.
 
 **Tests** in `tests/test_baseline.py`: 22 tests across 4 classes — `_hour_of_week` mapping (Mon midnight=0, Sun 23:00=167), `SeasonalBaselineModel` lookup and z-score arithmetic, `BaselineStore` TTL semantics with a hand-rolled stub fitter, and 4 integration tests against a real Postgres container verifying mean recovery within 5%, row persistence, empty-stage handling, and UPSERT idempotency.
+
+---
+
+### Milestone 11: CUSUMDetector
+
+**`detection/anomaly.py`**
+
+`AnomalyEvent` is a single frozen dataclass shared by both CUSUM and EWMA rather than per-detector schemas. The `detector_value` field carries the raw CUSUM accumulator (`S_upper` or `S_lower`) or the EWMA statistic depending on `detector_type` — callers that only compare against `threshold` work identically for both without branching. `signal` is `Literal["upper", "lower"]`, meaningful for both detectors. `extract_metric` is colocated here so adding a new metric (e.g., `payload_bytes`) requires editing one place, not every detector class.
+
+**`detection/cusum.py`**
+
+`CUSUMConfig` exposes `decision_threshold` (h) and `slack_parameter` (k) as independent first-class fields. The optimal values depend on the false-positive budget and the target shift magnitude, not on each other — deriving one from the other would couple two independent tuning knobs.
+
+`CUSUMDetector` implements the tabular (one-sided) CUSUM applied in both directions on seasonal z-scores:
+
+```
+S_upper[t] = max(0, S_upper[t-1] + z[t] - k)
+S_lower[t] = max(0, S_lower[t-1] - z[t] - k)
+```
+
+Fire when `S > h`. Reset only the accumulator that fired — if a latency spike causes `S_upper` to fire while `S_lower` has been accumulating concurrent negative drift (e.g., row_count collapse), resetting both would discard the lower accumulator's independent evidence stream. Skips the accumulator update entirely when the baseline returns `None` (no entry for this stage/slot) rather than treating it as z=0, so "no baseline" is distinguishable from "on target" in accumulator traces.
+
+**Tests** in `tests/test_cusum.py`: 21 tests across 4 classes — `CUSUMConfig` validation, `extract_metric` for all three metrics, accumulator arithmetic (increment, floor, reset-on-fire), step-change detection in both directions, ramp-change detection that a per-event z-score alarm misses, multi-stage accumulator isolation, explicit `reset()`, and silent no-op on missing baseline.
+
+The ramp scenario is the definitive CUSUM value test: latencies 56–65ms (z=0.6–1.5) all fall below the z=2.0 per-event alarm. CUSUM accumulates `Σ(z_i - k)` = 0.1+0.2+...+0.9 = 4.5 > h=4.0 and fires at event 9 of 10 — proving the detector catches gradual sustained drift rather than reacting to any individual spike.
 
 ---
 

@@ -125,11 +125,11 @@ Goal: give detectors a per-hour-of-week expected value to compare against so a s
 
 Goal: detect slow, sustained drift in latency or throughput — the failure mode that z-scores miss because the change is too gradual.
 
-- [ ] Implement `CUSUMDetector` — two-sided cumulative sum control chart; maintains `cusum_upper` and `cusum_lower` accumulators per stage
-- [ ] Add `cusum_decision_threshold` and `cusum_slack_parameter` (k) as configurable fields; document the trade-off between sensitivity and false-positive rate in the docstring
-- [ ] Integrate with `SeasonalBaselineModel` — CUSUM measures deviation from the seasonal expected value, not the global mean
-- [ ] Emit `AnomalyEvent` when either accumulator exceeds threshold; include `detector_type`, `stage_id`, `signal`, `cusum_value`, `threshold`
-- [ ] Write unit tests: feed step-change and ramp-change sequences, assert CUSUM detects ramp that z-score misses
+- [x] Implement `CUSUMDetector` — two-sided cumulative sum control chart; maintains `S_upper` and `S_lower` accumulators per `(stage_id, metric)` pair
+- [x] Add `decision_threshold` (h) and `slack_parameter` (k) as configurable fields in `CUSUMConfig`; document sensitivity vs false-positive trade-off in docstring
+- [x] Integrate with `SeasonalBaselineModel` — CUSUM measures z-score deviation from the seasonal expected value; skips update when baseline returns `None`
+- [x] Emit `AnomalyEvent` when either accumulator exceeds threshold; reset only the fired accumulator to preserve concurrent drift evidence in the other
+- [x] Write 21 unit tests: config validation, extract_metric, accumulator arithmetic, step-change and ramp-change detection, multi-stage isolation, reset semantics, missing baseline no-op
 
 ---
 

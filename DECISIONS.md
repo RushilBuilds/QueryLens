@@ -4,7 +4,20 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
-## ADR-022: BaselineFitter uses a Python-side cutoff datetime instead of SQL INTERVAL
+## ADR-025: CUSUMDetector resets only the fired accumulator, not both
+**Date:** 2026-03-22
+**Decision:** When `S_upper > h`, reset `S_upper = 0` but leave `S_lower` unchanged (and vice versa)
+**Alternatives considered:** Reset both accumulators on any fire; reset both plus a configurable cooldown window
+**Reasoning:** A latency spike can cause `S_upper` to fire while `S_lower` is simultaneously accumulating negative drift from another metric's concurrent downward shift. Resetting both on a single fire discards the lower accumulator's evidence — if a row_count collapse accompanies the latency spike, we want `S_lower(row_count)` to fire independently rather than being silently cleared by the latency alarm. Each accumulator is an independent evidence channel; resetting one does not invalidate the other.
+
+## ADR-024: Shared AnomalyEvent dataclass for both CUSUM and EWMA detectors
+**Date:** 2026-03-22
+**Decision:** Use a single `AnomalyEvent` schema with a `detector_type` discriminator field rather than separate `CUSUMAnomaly` and `EWMAAnomaly` dataclasses
+**Alternatives considered:** Per-detector frozen dataclasses; a base class with detector-specific subclasses
+**Reasoning:** The AnomalyEventBus (M13) publishes to a single Redpanda topic regardless of which detector fired. Separate schemas would force the bus to handle a union type and the downstream causal layer to branch on type before comparing against threshold. A shared schema with `detector_value` (raw accumulator for CUSUM or statistic for EWMA) lets the bus and consumer work identically for both detectors. The `signal` field (`upper`/`lower`) is meaningful for both: CUSUM has S_upper/S_lower; EWMA uses upper/lower control limits.
+
+## ADR-023: hour_of_week stored as SMALLINT with CHECK constraint, not as an enum
+**Date:** 2026-03-22 BaselineFitter uses a Python-side cutoff datetime instead of SQL INTERVAL
 **Date:** 2026-03-22
 **Decision:** Compute `cutoff = datetime.now(utc) - timedelta(days=lookback_days)` in Python and pass it as a bound parameter to the query
 **Alternatives considered:** `WHERE event_time >= NOW() - INTERVAL :days` with a cast in the SQL string
