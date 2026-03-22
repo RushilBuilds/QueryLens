@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Float, Integer, SmallInteger, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,6 +67,30 @@ class AnomalyEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class StageBaseline(Base):
+    """
+    I'm storing baselines in their own table rather than as a materialised view
+    or a JSON blob in pipeline_metrics because the fitter needs to UPSERT on
+    each run (ON CONFLICT DO UPDATE). Materialised views are read-only and JSON
+    blobs make the per-slot access pattern in the BaselineStore require
+    deserialisation on every detection tick. A normalised row per
+    (stage_id, hour_of_week, metric) lets the store load a full stage vector
+    with a single indexed scan and updates become row-level writes, not full
+    JSON document replacements.
+    """
+
+    __tablename__ = "stage_baselines"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stage_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    hour_of_week: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    metric: Mapped[str] = mapped_column(String(32), nullable=False)
+    baseline_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_std: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    fitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class FaultLocalization(Base):
