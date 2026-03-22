@@ -39,7 +39,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 5 | PostgreSQL schema + Alembic migrations | Done |
 | 6 | `RedpandaProducer` + serialization | Done |
 | 7 | `MetricConsumer` + `IngestionWorker` | Done |
-| 8 | Structured logging + Prometheus metrics | Pending |
+| 8 | Structured logging + Prometheus metrics | Done |
 | 9 | `SlidingWindowAggregator` | Pending |
 | 10 | `SeasonalBaselineModel` | Pending |
 | 11 | `CUSUMDetector` | Pending |
@@ -362,6 +362,24 @@ All tests run against a real `postgres:16-alpine` container via testcontainers. 
 - `TestDLQRouting`: 10 valid + 1 malformed interleaved → 10 rows in PostgreSQL, 1 envelope in DLQ topic with correct `source_topic`, `source_partition`, `source_offset`, and `error` fields
 
 Each test class uses its own Kafka topic to prevent cross-test offset contamination within the module-scoped broker.
+
+---
+
+### Milestone 8: structured logging and Prometheus /metrics
+
+**`ingestion/observability.py`**
+
+All five Prometheus metrics are defined as module-level singletons: `ingestion_records_consumed_total` and `ingestion_records_written_total` (Counters, labelled by `stage_id`), `ingestion_dlq_events_total` (Counter, no label — we don't have `stage_id` for messages that failed to deserialise), `ingestion_write_latency_seconds` (Histogram with sub-10ms buckets tuned for our target p99), and `ingestion_consumer_lag_seconds` (Gauge, labelled by `stage_id`, set to `wall_time - oldest_event_time` per flush). Module-level singletons rather than per-instance because `prometheus_client` raises on duplicate registration — construction inside a class would break the second time a `MetricConsumer` or `IngestionWorker` is instantiated in tests.
+
+`MetricsServer` wraps `wsgiref.simple_server` rather than `prometheus_client.start_http_server` because the return type of `start_http_server` changed between 0.16 and 0.20, making portable `shutdown()` calls impossible. `wsgiref` is stdlib and gives clean lifecycle control via `serve_forever` / `shutdown`. `port=0` lets the OS assign a free port — essential for tests running in parallel.
+
+`configure_structlog()` sets up JSON-rendered structured logging via `PrintLoggerFactory` (stdout). JSON output makes `trace_id` and `stage_id` filterable dimensions in any log aggregator without a custom regex.
+
+**`ingestion/consumer.py`** and **`ingestion/worker.py`**
+
+`MetricConsumer` logs `poll_batch_complete` (batch_size, valid, dlq, first/last offset) and `dlq_routed` (partition, offset, error[:200]) and increments `DLQ_EVENTS` in `_send_to_dlq`. `IngestionWorker` increments `RECORDS_CONSUMED` and `RECORDS_WRITTEN` per stage in `_flush`, observes `WRITE_LATENCY` in `_write_to_db`, and updates `CONSUMER_LAG` per stage before each flush using `_oldest_event_time_per_stage`.
+
+**Tests** in `tests/test_ingestion_observability.py`: 5 tests covering server startup, text-format metric presence, per-stage counter deltas, histogram observation, and DLQ counter increment — all asserting deltas rather than absolute values so they compose safely with other tests in the session.
 
 ---
 

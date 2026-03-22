@@ -4,6 +4,24 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-017: Prometheus metrics as module-level singletons in observability.py
+**Date:** 2026-03-22
+**Decision:** Define all `prometheus_client` Counter/Histogram/Gauge objects at module level rather than as instance variables on MetricConsumer or IngestionWorker
+**Alternatives considered:** Per-instance metrics objects; passing a custom `CollectorRegistry` to each class constructor
+**Reasoning:** `prometheus_client` raises `ValueError: Duplicated timeseries` if two collectors with the same name are registered to the same registry. Instance variables would trigger this on the second construction of MetricConsumer or IngestionWorker in the same process — which happens in every test that creates a fresh consumer. Module-level singletons are registered exactly once at import time. A custom per-instance registry was rejected because it would require threading the registry through the WSGI app, breaking the default scrape endpoint.
+
+## ADR-018: MetricsServer uses wsgiref.simple_server instead of prometheus_client.start_http_server
+**Date:** 2026-03-22
+**Decision:** Implement MetricsServer using `wsgiref.simple_server.make_server` with `prometheus_client.make_wsgi_app()`
+**Alternatives considered:** `prometheus_client.start_http_server(port)` — one-liner but return type changed across versions
+**Reasoning:** `start_http_server` returned `None` in prometheus_client ≤0.16 and a `(server, thread)` tuple in ≥0.17. Calling `shutdown()` portably would require a version check. `wsgiref` is stdlib, stable, and gives clean lifecycle control: `serve_forever()` in a daemon thread, `shutdown()` synchronously. `port=0` lets the OS assign a free port, which prevents port collisions in parallel test runs.
+
+## ADR-019: DLQ_EVENTS counter carries no stage_id label
+**Date:** 2026-03-22
+**Decision:** `ingestion_dlq_events_total` is a flat counter with no labels
+**Alternatives considered:** Label by `stage_id="unknown"` for all DLQ events
+**Reasoning:** The stage_id is extracted during deserialization. A message lands in the DLQ precisely because deserialization failed — we do not have a stage_id to label with. Emitting `stage_id="unknown"` would look meaningful in Grafana but carry no actual signal. A flat counter is honest: it says "something was unreadable" without implying we know which stage it came from.
+
 ## ADR-014: Manual Kafka offset commit — commit only after successful PostgreSQL write
 **Date:** 2026-03-20
 **Decision:** Disable `enable.auto.commit` and commit offsets synchronously via `consumer.commit(asynchronous=False)` only after `session.commit()` succeeds

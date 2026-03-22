@@ -90,10 +90,10 @@ Goal: pull events off the topic and write them to PostgreSQL with at-least-once 
 
 Goal: make the ingestion layer observable before it touches production data — no guessing about consumer lag or write throughput.
 
-- [ ] Wire `structlog` into `MetricConsumer` and `IngestionWorker` — every log line carries `trace_id`, `stage_id`, `batch_size`, `offset`
-- [ ] Expose Prometheus counters via `prometheus_client`: `records_consumed_total`, `records_written_total`, `consumer_lag_seconds`, `dlq_events_total`, `write_latency_seconds` (histogram)
-- [ ] Add `/metrics` HTTP endpoint to the ingestion process so Prometheus can scrape it without a sidecar
-- [ ] Write test: run ingestion against `testcontainers`, scrape `/metrics`, assert all counters increment correctly after a known batch
+- [x] Wire `structlog` into `MetricConsumer` and `IngestionWorker` — every log line carries `trace_id`, `stage_id`, `batch_size`, `offset`
+- [x] Expose Prometheus counters via `prometheus_client`: `records_consumed_total`, `records_written_total`, `consumer_lag_seconds`, `dlq_events_total`, `write_latency_seconds` (histogram)
+- [x] Add `/metrics` HTTP endpoint to the ingestion process so Prometheus can scrape it without a sidecar
+- [x] Write test: run ingestion against `testcontainers`, scrape `/metrics`, assert all counters increment correctly after a known batch
 
 ---
 
