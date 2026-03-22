@@ -4,6 +4,18 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-022: BaselineFitter uses a Python-side cutoff datetime instead of SQL INTERVAL
+**Date:** 2026-03-22
+**Decision:** Compute `cutoff = datetime.now(utc) - timedelta(days=lookback_days)` in Python and pass it as a bound parameter to the query
+**Alternatives considered:** `WHERE event_time >= NOW() - INTERVAL :days` with a cast in the SQL string
+**Reasoning:** SQLAlchemy's `text()` API does not natively map Python integers to the PostgreSQL `INTERVAL` type — the workaround `(':days' || ' days')::INTERVAL` is fragile across Postgres versions and hard to read. A Python-side datetime is straightforward to bind, portable, and makes the lookback window inspectable in tests without depending on DB server time.
+
+## ADR-023: hour_of_week stored as SMALLINT with CHECK constraint, not as an enum
+**Date:** 2026-03-22
+**Decision:** `hour_of_week SMALLINT CHECK (hour_of_week >= 0 AND hour_of_week <= 167)`
+**Alternatives considered:** PostgreSQL `ENUM` type; plain `INTEGER` with no constraint
+**Reasoning:** A Postgres ENUM requires a separate `CREATE TYPE` DDL statement and cannot be altered without a full type drop-and-recreate. If we ever change the slot granularity (e.g., 30-minute slots → 336 values instead of 168), migrating an ENUM is painful. `SMALLINT` with a `CHECK` constraint captures the domain constraint at the type level and is easily widened in a future migration with just a `CHECK` update.
+
 ## ADR-020: RingBuffer backed by numpy arrays rather than collections.deque
 **Date:** 2026-03-22
 **Decision:** Use two parallel `np.float64` arrays (timestamps + values) as the ring buffer backing store

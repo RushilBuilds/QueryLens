@@ -114,10 +114,10 @@ Goal: maintain a continuously updated statistical summary of each pipeline stage
 
 Goal: give detectors a per-hour-of-week expected value to compare against so a slow Monday morning doesn't look like an anomaly.
 
-- [ ] Implement `SeasonalBaselineModel` — fits a per-`(stage_id, hour_of_week)` baseline mean and standard deviation from historical `pipeline_metrics` data
-- [ ] Add `BaselineFitter` — queries PostgreSQL for the past N days of data, fits baselines, and writes them to a `stage_baselines` table
-- [ ] Implement `BaselineStore` — in-memory cache of fitted baselines with TTL-based refresh; avoids hitting PostgreSQL on every detection tick
-- [ ] Write tests: fit baselines on synthetic data with a known weekly pattern, assert model recovers injected means within 5%
+- [x] Implement `SeasonalBaselineModel` — fits a per-`(stage_id, hour_of_week)` baseline mean and standard deviation from historical `pipeline_metrics` data
+- [x] Add `BaselineFitter` — queries PostgreSQL for the past N days of data, fits baselines, and writes them to a `stage_baselines` table
+- [x] Implement `BaselineStore` — in-memory cache of fitted baselines with TTL-based refresh; avoids hitting PostgreSQL on every detection tick
+- [x] Write tests: fit baselines on synthetic data with a known weekly pattern, assert model recovers injected means within 5%
 
 ---
 

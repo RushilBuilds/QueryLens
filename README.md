@@ -41,7 +41,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 7 | `MetricConsumer` + `IngestionWorker` | Done |
 | 8 | Structured logging + Prometheus metrics | Done |
 | 9 | `SlidingWindowAggregator` | Done |
-| 10 | `SeasonalBaselineModel` | Pending |
+| 10 | `SeasonalBaselineModel` | Done |
 | 11 | `CUSUMDetector` | Pending |
 | 12 | `EWMADetector` | Pending |
 | 13 | `AnomalyEventBus` | Pending |
@@ -362,6 +362,24 @@ All tests run against a real `postgres:16-alpine` container via testcontainers. 
 - `TestDLQRouting`: 10 valid + 1 malformed interleaved → 10 rows in PostgreSQL, 1 envelope in DLQ topic with correct `source_topic`, `source_partition`, `source_offset`, and `error` fields
 
 Each test class uses its own Kafka topic to prevent cross-test offset contamination within the module-scoped broker.
+
+---
+
+### Milestone 10: SeasonalBaselineModel
+
+**`migrations/versions/002_stage_baselines.py`**
+
+Adds the `stage_baselines` table with a `UNIQUE (stage_id, hour_of_week, metric)` constraint that enables idempotent UPSERT on every fitter run. `hour_of_week` is `SMALLINT` with a `CHECK (0 <= hour_of_week <= 167)` constraint — the narrower type signals at the schema level that this is a bounded enumeration, not a general integer. A `CHECK` on `metric` restricts values to the three we track rather than letting typos create phantom baseline slots silently.
+
+**`detection/baseline.py`**
+
+`_hour_of_week(dt)` converts a datetime to a 0–167 slot using Python's `weekday()` (Monday=0), matching ISO week convention. `BaselineFitter` uses a Python-side cutoff datetime rather than `NOW() - INTERVAL '28 days'` in SQL to avoid `INTERVAL` parameterisation fragility and make the window testable without depending on DB server time. The SELECT uses a single `GROUP BY (stage_id, dow, hod)` pass for all three metrics — one round trip instead of three. PostgreSQL's `EXTRACT(DOW ...)` returns Sunday=0 so the fitter converts to ISO weekday with `(dow + 6) % 7` to match `_hour_of_week`.
+
+`SeasonalBaselineModel.z_score()` uses `event_time` (not wall time) to look up the seasonal slot so historical replays get the correct baseline. Returns `None` when `baseline_std == 0.0` — a degenerate std means either one sample or perfectly constant data; CUSUM/EWMA must skip the update rather than accumulate a nonsensical value.
+
+`BaselineStore` uses `time.monotonic()` for TTL tracking (never goes backwards, immune to NTP jumps and DST transitions). `get_model()` re-fits lazily on first call and when TTL expires — no background thread needed since the detection loop is synchronous and the fit takes <100ms.
+
+**Tests** in `tests/test_baseline.py`: 22 tests across 4 classes — `_hour_of_week` mapping (Mon midnight=0, Sun 23:00=167), `SeasonalBaselineModel` lookup and z-score arithmetic, `BaselineStore` TTL semantics with a hand-rolled stub fitter, and 4 integration tests against a real Postgres container verifying mean recovery within 5%, row persistence, empty-stage handling, and UPSERT idempotency.
 
 ---
 
