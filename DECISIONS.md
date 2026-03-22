@@ -4,6 +4,18 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-020: RingBuffer backed by numpy arrays rather than collections.deque
+**Date:** 2026-03-22
+**Decision:** Use two parallel `np.float64` arrays (timestamps + values) as the ring buffer backing store
+**Alternatives considered:** `collections.deque(maxlen=capacity)` of `(timestamp, value)` tuples
+**Reasoning:** `window_values()` feeds directly into `np.percentile()`. With a deque, every `compute()` call would require converting the deque to a list and then to a numpy array — at 1,000 samples that is ~40µs of allocation overhead per tick, multiplied by the number of stages and metrics. The numpy array lets us index and mask in-place with no allocation on the hot path.
+
+## ADR-021: WindowStats returns None for all stats when is_stable is False
+**Date:** 2026-03-22
+**Decision:** Set all stat fields to `None` when `sample_count < min_sample_count`
+**Alternatives considered:** Return 0.0; return `float("nan")`
+**Reasoning:** `0.0` looks like a real latency measurement (0ms latency) and would trigger CUSUM/EWMA false alerts during the startup warmup period before the window has enough samples. `float("nan")` propagates silently through numpy arithmetic, meaning a detector that forgets to check `is_stable` would produce `nan` anomaly scores with no error. `None` raises `TypeError` immediately if the caller tries to use the value without checking `is_stable`, which surfaces the bug at the point of the mistake rather than downstream.
+
 ## ADR-017: Prometheus metrics as module-level singletons in observability.py
 **Date:** 2026-03-22
 **Decision:** Define all `prometheus_client` Counter/Histogram/Gauge objects at module level rather than as instance variables on MetricConsumer or IngestionWorker

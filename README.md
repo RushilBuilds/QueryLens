@@ -40,7 +40,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 6 | `RedpandaProducer` + serialization | Done |
 | 7 | `MetricConsumer` + `IngestionWorker` | Done |
 | 8 | Structured logging + Prometheus metrics | Done |
-| 9 | `SlidingWindowAggregator` | Pending |
+| 9 | `SlidingWindowAggregator` | Done |
 | 10 | `SeasonalBaselineModel` | Pending |
 | 11 | `CUSUMDetector` | Pending |
 | 12 | `EWMADetector` | Pending |
@@ -362,6 +362,20 @@ All tests run against a real `postgres:16-alpine` container via testcontainers. 
 - `TestDLQRouting`: 10 valid + 1 malformed interleaved → 10 rows in PostgreSQL, 1 envelope in DLQ topic with correct `source_topic`, `source_partition`, `source_offset`, and `error` fields
 
 Each test class uses its own Kafka topic to prevent cross-test offset contamination within the module-scoped broker.
+
+---
+
+### Milestone 9: SlidingWindowAggregator
+
+**`detection/window.py`**
+
+`RingBuffer` is a fixed-capacity circular buffer backed by two parallel numpy float64 arrays — one for timestamps, one for values. Writes go to `_data[_head % capacity]` and advance the head pointer, overwriting the oldest entry when full. `window_values(cutoff_s)` builds an ordered index array from head/count and returns a masked view of values whose timestamps are >= cutoff. The numpy array avoids the list conversion that a `collections.deque` would require on every `compute()` call — at 1,000 samples per stage the deque approach would add ~40µs of allocation overhead per tick.
+
+`WindowConfig` holds window_duration_s, tick_interval_s, min_sample_count, and ring_buffer_capacity as a frozen dataclass so all three detectors (CUSUM, EWMA, aggregator) share the same config object and cannot silently diverge on these values.
+
+`SlidingWindowAggregator` maintains one `RingBuffer` per `(stage_id, metric_name)` pair. Three metrics are tracked: `latency_ms` and `row_count` from the event directly; `error_rate` is derived at update time as `0.0 if status == "ok" else 1.0` so the detection layer never needs to depend on the raw status string. `compute(stage_id, now)` returns a `WindowStats` with p50/p95/p99/mean using `np.percentile` with linear interpolation — the same method Prometheus uses for histogram quantile estimation, making the values directly comparable. All stat fields are `None` when `sample_count < min_sample_count`, which forces callers to gate on `is_stable` rather than silently consuming zeros as real measurements.
+
+**Tests** in `tests/test_window.py`: 19 tests covering validation, empty buffer edge cases, wrap-around at capacity, cutoff boundary semantics (>= not >), multi-stage isolation, error rate derivation, and percentile match against numpy reference.
 
 ---
 

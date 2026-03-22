@@ -103,10 +103,10 @@ Goal: make the ingestion layer observable before it touches production data — 
 
 Goal: maintain a continuously updated statistical summary of each pipeline stage — the foundation every detector reads from.
 
-- [ ] Implement `RingBuffer` — fixed-size circular buffer backed by `numpy` array; O(1) insert and O(1) eviction of expired entries
-- [ ] Build `SlidingWindowAggregator` — maintains per-`stage_id` windows for `latency_ms`, `row_count`, and `error_rate`; computes p50/p95/p99 on each tick
-- [ ] Add `WindowConfig` — configurable window duration, tick interval, and minimum sample count before statistics are considered stable
-- [ ] Write unit tests: feed known sequences into the aggregator, assert percentile values match `numpy.percentile` reference calculations
+- [x] Implement `RingBuffer` — fixed-size circular buffer backed by `numpy` array; O(1) insert and O(1) eviction of expired entries
+- [x] Build `SlidingWindowAggregator` — maintains per-`stage_id` windows for `latency_ms`, `row_count`, and `error_rate`; computes p50/p95/p99 on each tick
+- [x] Add `WindowConfig` — configurable window duration, tick interval, and minimum sample count before statistics are considered stable
+- [x] Write unit tests: feed known sequences into the aggregator, assert percentile values match `numpy.percentile` reference calculations
 
 ---
 
