@@ -127,6 +127,7 @@ class CUSUMDetector:
                     threshold=h,
                     z_score=z,
                     detected_at=event.event_time,
+                    fault_label=event.fault_label,
                 ))
                 s_up = 0.0
 
@@ -140,6 +141,7 @@ class CUSUMDetector:
                     threshold=h,
                     z_score=z,
                     detected_at=event.event_time,
+                    fault_label=event.fault_label,
                 ))
                 s_lo = 0.0
 

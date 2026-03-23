@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from simulator.models import PipelineEvent
 
@@ -22,6 +22,10 @@ class AnomalyEvent:
     named 'detector_value' rather than 'cusum_value' or 'ewma_value' so that
     callers that only need to compare against threshold work identically for
     both detectors without branching on detector_type.
+
+    fault_label propagates from the originating PipelineEvent so that the M14
+    benchmark can compute precision and recall against ground-truth fault labels
+    without joining back to pipeline_metrics on every query.
     """
 
     detector_type: str                    # 'cusum' or 'ewma'
@@ -32,6 +36,7 @@ class AnomalyEvent:
     threshold: float                      # the h or L value that was exceeded
     z_score: float                        # the normalised input that triggered it
     detected_at: datetime                 # event_time of the triggering event
+    fault_label: Optional[str] = None     # ground-truth label propagated from PipelineEvent
 
 
 def extract_metric(event: PipelineEvent, metric: str) -> float:

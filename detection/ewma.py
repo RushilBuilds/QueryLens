@@ -155,6 +155,7 @@ class EWMADetector:
                     threshold=control_limit,
                     z_score=z,
                     detected_at=event.event_time,
+                    fault_label=event.fault_label,
                 ))
                 self._state[key] = (0.0, n)
             elif ewma_val < -control_limit:
@@ -167,6 +168,7 @@ class EWMADetector:
                     threshold=control_limit,
                     z_score=z,
                     detected_at=event.event_time,
+                    fault_label=event.fault_label,
                 ))
                 self._state[key] = (0.0, n)
 

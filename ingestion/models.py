@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, SmallInteger, String, Text
+from sqlalchemy import BigInteger, DateTime, Float, Integer, SmallInteger, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -48,22 +48,35 @@ class PipelineMetric(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
-class AnomalyEvent(Base):
+class AnomalyEventRow(Base):
     """
-    I'm stubbing AnomalyEvent with only its identity columns now because the full
-    schema (anomaly_type, score, window_start, window_end, detector_version) depends
-    on decisions made in Milestone 9 (sliding window aggregator) and Milestone 10
-    (CUSUM/EWMA detector). Defining those columns prematurely would require a second
-    migration to correct them once the detection contracts are finalized.
+    I'm naming this AnomalyEventRow rather than AnomalyEvent to avoid shadowing
+    the frozen dataclass of the same name in detection.anomaly. Both need to be
+    importable in the same file (integration tests, AnomalyPersister) — a name
+    collision would force an alias every time, whereas distinct names make the
+    boundary between in-memory event and DB row explicit at the type level.
 
-    The created_at and stage_id columns are the only fields guaranteed to be stable
-    regardless of how the detection API evolves.
+    created_at is the wall-clock time the persister wrote the row; detected_at
+    is the event_time of the PipelineEvent that triggered the anomaly. The gap
+    between the two is the end-to-end detection-to-persistence latency — useful
+    for the M14 benchmark to assess pipeline lag.
     """
 
     __tablename__ = "anomaly_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     stage_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    detector_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    metric: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal: Mapped[str] = mapped_column(String(8), nullable=False)
+    detector_value: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    z_score: Mapped[float] = mapped_column(Float, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    fault_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    schema_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
