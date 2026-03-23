@@ -43,7 +43,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 9 | `SlidingWindowAggregator` | Done |
 | 10 | `SeasonalBaselineModel` | Done |
 | 11 | `CUSUMDetector` | Complete |
-| 12 | `EWMADetector` | Pending |
+| 12 | `EWMADetector` | Complete |
 | 13 | `AnomalyEventBus` | Pending |
 | 14 | Detection accuracy benchmarks | Pending |
 | 15 to 18 | Causal analysis layer | Pending |
@@ -405,6 +405,28 @@ Fire when `S > h`. Reset only the accumulator that fired — if a latency spike 
 **Tests** in `tests/test_cusum.py`: 21 tests across 4 classes — `CUSUMConfig` validation, `extract_metric` for all three metrics, accumulator arithmetic (increment, floor, reset-on-fire), step-change detection in both directions, ramp-change detection that a per-event z-score alarm misses, multi-stage accumulator isolation, explicit `reset()`, and silent no-op on missing baseline.
 
 The ramp scenario is the definitive CUSUM value test: latencies 56–65ms (z=0.6–1.5) all fall below the z=2.0 per-event alarm. CUSUM accumulates `Σ(z_i - k)` = 0.1+0.2+...+0.9 = 4.5 > h=4.0 and fires at event 9 of 10 — proving the detector catches gradual sustained drift rather than reacting to any individual spike.
+
+---
+
+### Milestone 12: EWMADetector
+
+**`detection/ewma.py`**
+
+`EWMAConfig` exposes `smoothing` (λ) and `control_limit_width` (L) as independent fields — λ controls detection lag vs. smoothing and L controls false-positive rate. Merging them into a single sensitivity knob would make it impossible to tune the two independently.
+
+`EWMADetector` applies the Lucas & Saccucci (1990) EWMA control chart to seasonal z-scores:
+
+```
+Z_t = λ * z_t + (1 - λ) * Z_{t-1},   Z_0 = 0
+σ²_t = (λ / (2 - λ)) * [1 - (1 - λ)^(2t)]
+UCL_t = L * σ_t,   LCL_t = -L * σ_t
+```
+
+The exact-variance formula has a key algebraic property at t=1: σ_1 = λ, so Z_1 = λ*z_1 and the firing condition `|Z_1| > L*λ` reduces to `|z_1| > L`. The first tick is equivalent to a z-score test — EWMA detects a single impulse with |z| > L immediately, while CUSUM (with h=4, k=0.5) needs `S_upper = z - k = 3.5 - 0.5 = 3.0 < 4.0` and does not fire. This is the complementarity that justifies running both detectors in parallel.
+
+After a fire, the EWMA value resets to 0 but step count `n` is preserved so the control limit stays at its mature (wider) value during re-arm. Resetting `n` too would collapse the limits back to startup tightness and cause spurious fires on the first post-reset event.
+
+**Tests** in `tests/test_ewma.py`: 21 tests across 5 classes — `EWMAConfig` validation, EWMA arithmetic (value after 1 and 2 steps, the σ_1=λ identity, missing-baseline no-op), impulse detection (upward and downward in one tick, confirmed CUSUM non-redundancy, sub-threshold non-fire), no-fire under on-target events, reset semantics (value reset, n preserved, explicit full reset), and multi-stage state isolation.
 
 ---
 

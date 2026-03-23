@@ -4,6 +4,12 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-026: EWMADetector resets EWMA value but preserves step count after a fire
+**Date:** 2026-03-23
+**Decision:** After firing an `AnomalyEvent`, reset the EWMA statistic to 0 but keep `n` (step count) intact
+**Alternatives considered:** Reset both value and n (full restart); no reset at all (continuous re-firing); reset with FIR head-start
+**Reasoning:** Resetting n would re-tighten the exact-variance control limits to their startup values on the next event, causing spurious fires during the re-arm period because the first post-reset event again faces UCL = L*λ (the tightest possible limit). Keeping n means the control limit stays at its mature, wider value — the detector re-arms from centre without the startup sensitivity. Full reset (via explicit `reset()`) is still available for the healing layer when it wants to wipe state completely after a confirmed fault is remediated.
+
 ## ADR-025: CUSUMDetector resets only the fired accumulator, not both
 **Date:** 2026-03-22
 **Decision:** When `S_upper > h`, reset `S_upper = 0` but leave `S_lower` unchanged (and vice versa)

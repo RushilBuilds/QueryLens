@@ -137,10 +137,10 @@ Goal: detect slow, sustained drift in latency or throughput — the failure mode
 
 Goal: catch sharp, short-duration spikes that CUSUM's accumulation lag would miss — latency bursts, sudden error floods.
 
-- [ ] Implement `EWMADetector` — exponentially weighted moving average with configurable smoothing parameter λ (0 < λ ≤ 1)
-- [ ] Add control limits derived from EWMA variance formula — tighter than 3σ at startup, stabilizes as n grows
-- [ ] Ensure EWMA and CUSUM detectors share the same `AnomalyEvent` schema so the event bus treats them identically
-- [ ] Write unit tests: feed impulse and step sequences; assert EWMA reacts to impulse within 1 tick and CUSUM does not
+- [x] Implement `EWMADetector` — exponentially weighted moving average with configurable smoothing parameter λ (0 < λ ≤ 1)
+- [x] Add control limits derived from EWMA variance formula — tighter than 3σ at startup, stabilizes as n grows
+- [x] Ensure EWMA and CUSUM detectors share the same `AnomalyEvent` schema so the event bus treats them identically
+- [x] Write unit tests: feed impulse and step sequences; assert EWMA reacts to impulse within 1 tick and CUSUM does not
 
 ---
 
