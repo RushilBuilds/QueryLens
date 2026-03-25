@@ -171,10 +171,10 @@ Goal: measure precision and recall against ground-truth fault labels before the 
 
 Goal: transform the structural pipeline graph from Phase 1 into a causal graph that supports do-calculus queries.
 
-- [ ] Build `CausalDAG` — wraps `PipelineTopologyGraph` as a `networkx.DiGraph`; adds edge attribute `propagation_delay_ms` derived from stage config
-- [ ] Implement `AncestorResolver` — given a symptomatic stage, returns all causal ancestors ordered by graph distance and propagation delay
-- [ ] Add `CausalDAGValidator` — asserts the graph satisfies d-separation conditions required for valid do-calculus; raises on violation
-- [ ] Write tests: assert ancestor resolution is correct on a known 5-stage DAG with two branch paths
+- [x] Build `CausalDAG` — wraps `PipelineTopologyGraph` as a `networkx.DiGraph`; adds edge attribute `propagation_delay_ms` derived from stage config
+- [x] Implement `AncestorResolver` — given a symptomatic stage, returns all causal ancestors ordered by graph distance and propagation delay
+- [x] Add `CausalDAGValidator` — asserts the graph satisfies d-separation conditions required for valid do-calculus; raises on violation
+- [x] Write tests: assert ancestor resolution is correct on a known 5-stage DAG with two branch paths
 
 ---
 

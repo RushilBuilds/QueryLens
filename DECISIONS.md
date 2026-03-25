@@ -4,6 +4,12 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-030: CausalDAG wraps PipelineTopologyGraph rather than extending or reconstructing it
+**Date:** 2026-03-25
+**Decision:** `CausalDAG` holds a reference to the `PipelineTopologyGraph` and accesses its internal `_graph` directly, rather than re-building a separate `nx.DiGraph` from stage data
+**Alternatives considered:** Subclassing `PipelineTopologyGraph`; accepting raw stage list and building a parallel DiGraph
+**Reasoning:** The topology and the causal graph must always be structurally identical — two separate graphs would require synchronisation logic. Accessing `_graph` directly means there is one authoritative graph object. Subclassing was rejected because `CausalDAG` has different semantics (do-calculus queries, delay scoring) that have no place in the structural topology layer — inheritance would merge two layers with different change reasons.
+
 ## ADR-029: DetectorBenchmark measures window-level recall, not event-level recall
 **Date:** 2026-03-25
 **Decision:** Recall is defined as "fraction of fault windows where at least one anomaly fired during the window," not "fraction of faulted events that triggered a detection"
