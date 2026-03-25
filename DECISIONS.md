@@ -4,6 +4,12 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-031: FaultLocalizationEngine uses gap-based window correlation, not fixed sliding window
+**Date:** 2026-03-26
+**Decision:** `AnomalyWindowCollector` closes a window when the gap since the last anomaly exceeds `gap_duration_s`, not when `gap_duration_s` has elapsed since the window opened
+**Alternatives considered:** Fixed sliding window (close after N seconds from first event); count-based window (close after N events)
+**Reasoning:** A fixed window closes prematurely during a fault storm where anomalies arrive faster than the window size — the first burst would be in window 1, the continuation in window 2, splitting one fault event into two hypotheses. Gap-based grouping keeps all anomalies from a single fault propagation in one hypothesis regardless of their intra-burst rate. The trade-off is one gap duration of added latency before the engine sees the hypothesis — acceptable at 30s for offline analysis, tunable down to 5s for real-time healing.
+
 ## ADR-030: CausalDAG wraps PipelineTopologyGraph rather than extending or reconstructing it
 **Date:** 2026-03-25
 **Decision:** `CausalDAG` holds a reference to the `PipelineTopologyGraph` and accesses its internal `_graph` directly, rather than re-building a separate `nx.DiGraph` from stage data

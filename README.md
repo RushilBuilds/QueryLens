@@ -47,7 +47,8 @@ The system is split into independent layers. Each one can be tested in isolation
 | 13 | `AnomalyEventBus` + `AnomalyPersister` | Complete |
 | 14 | Detection accuracy benchmarks | Complete |
 | 15 | `CausalDAG` + `AncestorResolver` + `CausalDAGValidator` | Complete |
-| 16 to 18 | Causal analysis layer | Pending |
+| 16 | `FaultLocalizationEngine` + `AnomalyWindowCollector` | Complete |
+| 17 to 18 | Causal analysis layer | Pending |
 | 19 to 22 | Self-healing layer | Pending |
 | 23 to 26 | API layer | Pending |
 | 27 to 29 | Observatory dashboard | Pending |

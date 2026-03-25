@@ -182,10 +182,10 @@ Goal: transform the structural pipeline graph from Phase 1 into a causal graph t
 
 Goal: given a set of co-occurring anomalies and the causal graph, output a ranked list of candidate root-cause stages with probability scores.
 
-- [ ] Implement `AnomalyWindowCollector` — groups `AnomalyEvent` objects within a configurable correlation window into a single `FaultHypothesis`
-- [ ] Build `FaultLocalizationEngine` — for each `FaultHypothesis`, walks the `CausalDAG` and scores each ancestor stage using a Bayesian update on anomaly timing relative to `propagation_delay_ms`
-- [ ] Add `LocalizationResult` dataclass — fields: `hypothesis_id`, `ranked_candidates` (list of `(stage_id, posterior_probability)`), `triggered_at`, `evidence_events`
-- [ ] Write tests using ground-truth fault labels from Milestone 3: assert true root cause appears in top-2 candidates in ≥ 85% of scenarios
+- [x] Implement `AnomalyWindowCollector` — groups `AnomalyEvent` objects within a configurable correlation window into a single `FaultHypothesis`
+- [x] Build `FaultLocalizationEngine` — for each `FaultHypothesis`, walks the `CausalDAG` and scores each ancestor stage using a Bayesian update on anomaly timing relative to `propagation_delay_ms`
+- [x] Add `LocalizationResult` dataclass — fields: `hypothesis_id`, `ranked_candidates` (list of `(stage_id, posterior_probability)`), `triggered_at`, `evidence_events`
+- [x] Write tests using ground-truth fault labels from Milestone 3: assert true root cause appears in top-2 candidates in ≥ 85% of scenarios
 
 ---
 
