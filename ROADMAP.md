@@ -148,9 +148,9 @@ Goal: catch sharp, short-duration spikes that CUSUM's accumulation lag would mis
 
 Goal: decouple detection from causal analysis and healing — each layer subscribes independently and can evolve without touching the detector.
 
-- [ ] Implement `AnomalyEventBus` — wraps `RedpandaProducer` for the `pipeline.anomalies` topic; serializes `AnomalyEvent` with schema version
-- [ ] Add `AnomalyPersister` — consumes from `pipeline.anomalies` and writes to the `anomaly_events` PostgreSQL table for audit and replay
-- [ ] Write integration test: fire both detectors against a faulted event stream, assert all `AnomalyEvent` objects land in Redpanda and PostgreSQL with correct `fault_label` alignment
+- [x] Implement `AnomalyEventBus` — wraps `RedpandaProducer` for the `pipeline.anomalies` topic; serializes `AnomalyEvent` with schema version
+- [x] Add `AnomalyPersister` — consumes from `pipeline.anomalies` and writes to the `anomaly_events` PostgreSQL table for audit and replay
+- [x] Write integration test: fire both detectors against a faulted event stream, assert all `AnomalyEvent` objects land in Redpanda and PostgreSQL with correct `fault_label` alignment
 
 ---
 

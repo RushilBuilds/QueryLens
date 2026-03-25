@@ -44,7 +44,7 @@ The system is split into independent layers. Each one can be tested in isolation
 | 10 | `SeasonalBaselineModel` | Done |
 | 11 | `CUSUMDetector` | Complete |
 | 12 | `EWMADetector` | Complete |
-| 13 | `AnomalyEventBus` | Pending |
+| 13 | `AnomalyEventBus` + `AnomalyPersister` | Complete |
 | 14 | Detection accuracy benchmarks | Pending |
 | 15 to 18 | Causal analysis layer | Pending |
 | 19 to 22 | Self-healing layer | Pending |

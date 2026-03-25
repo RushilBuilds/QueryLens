@@ -4,6 +4,18 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-028: AnomalyEventRow named distinctly from AnomalyEvent dataclass
+**Date:** 2026-03-25
+**Decision:** The SQLAlchemy ORM model for the `anomaly_events` table is named `AnomalyEventRow`, not `AnomalyEvent`
+**Alternatives considered:** Naming both `AnomalyEvent` and using module-level aliases in every import; a base class with subclasses
+**Reasoning:** `AnomalyPersister` and integration tests need to import both the frozen dataclass (in-memory event) and the ORM model (DB row) in the same file. A naming collision would force `as` aliases on every import, which is noise that obscures intent. Distinct names — `AnomalyEvent` for the wire/in-memory object and `AnomalyEventRow` for the persistence model — make the architectural boundary explicit at the type level with no aliasing overhead.
+
+## ADR-027: AnomalyEventBus wraps confluent_kafka.Producer directly rather than composing RedpandaProducer
+**Date:** 2026-03-25
+**Decision:** `AnomalyEventBus` constructs its own `confluent_kafka.Producer` with the same durability settings as `RedpandaProducer` rather than wrapping `RedpandaProducer`
+**Alternatives considered:** Subclassing `RedpandaProducer`; adding a serializer injection parameter to `RedpandaProducer`
+**Reasoning:** `RedpandaProducer` has a hard-coded `MetricEventSerializer` dependency and no way to inject a different serializer. Subclassing to override serialization would violate the single-responsibility principle — `RedpandaProducer` would become both a metric publisher and a general-purpose Kafka wrapper. Adding a serializer injection parameter generalises the class before there is a second consumer, which is premature. The direct duplication of the producer config (7 lines) is the right trade-off at this stage; the architectural boundary between metric events and anomaly events is cleaner than the saved lines of code.
+
 ## ADR-026: EWMADetector resets EWMA value but preserves step count after a fire
 **Date:** 2026-03-23
 **Decision:** After firing an `AnomalyEvent`, reset the EWMA statistic to 0 but keep `n` (step count) intact
