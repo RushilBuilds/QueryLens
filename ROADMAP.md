@@ -158,10 +158,10 @@ Goal: decouple detection from causal analysis and healing — each layer subscri
 
 Goal: measure precision and recall against ground-truth fault labels before the causal layer tries to use detector output — garbage in, garbage out.
 
-- [ ] Build `DetectorBenchmark` — runs a full simulated scenario, collects detector output, and computes precision, recall, F1, and mean detection lag per fault type
-- [ ] Assert recall ≥ 0.90 and false-positive rate ≤ 0.05 across all six fault types from Milestone 3
-- [ ] Write a benchmark report to `docs/detection_benchmark.md` showing per-detector, per-fault-type breakdown
-- [ ] Gate CI: fail the benchmark job if either threshold is breached
+- [x] Build `DetectorBenchmark` — runs a full simulated scenario, collects detector output, and computes precision, recall, F1, and mean detection lag per fault type
+- [x] Assert recall ≥ 0.90 and false-positive rate ≤ 0.05 across all six fault types from Milestone 3
+- [x] Write a benchmark report to `docs/detection_benchmark.md` showing per-detector, per-fault-type breakdown
+- [x] Gate CI: fail the benchmark job if either threshold is breached
 
 ---
 

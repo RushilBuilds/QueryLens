@@ -4,6 +4,12 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-029: DetectorBenchmark measures window-level recall, not event-level recall
+**Date:** 2026-03-25
+**Decision:** Recall is defined as "fraction of fault windows where at least one anomaly fired during the window," not "fraction of faulted events that triggered a detection"
+**Alternatives considered:** Event-level recall (TP events / total fault events); precision-recall curves with varying thresholds
+**Reasoning:** Detectors are not designed to fire on every faulted event — CUSUM accumulates and fires once when the threshold is crossed; EWMA fires and resets. Measuring event-level recall would penalise the correct behaviour (one fire per fault window, not thirty). Window-level recall captures the operational question: "Did we know something was wrong during the fault period?" A window that fires on event 2 of 30 is a successful detection even though events 3–30 produced no additional fires.
+
 ## ADR-028: AnomalyEventRow named distinctly from AnomalyEvent dataclass
 **Date:** 2026-03-25
 **Decision:** The SQLAlchemy ORM model for the `anomaly_events` table is named `AnomalyEventRow`, not `AnomalyEvent`
