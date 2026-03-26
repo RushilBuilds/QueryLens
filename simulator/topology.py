@@ -11,17 +11,13 @@ import yaml
 @dataclass
 class PipelineStage:
     """
-    I'm keeping PipelineStage as a pure value object — no references back to the graph
-    that contains it. This lets TopologyLoader construct stages from YAML before the
-    graph exists, and lets the graph be rebuilt from stages without mutating the stages
-    themselves. Circular references between stage and graph would make serialisation
-    and testing significantly messier.
+    Pure value object — no back-reference to the graph. TopologyLoader can construct
+    stages from YAML before the graph exists, and the graph can be rebuilt from stages
+    without mutating them.
 
-    propagation_delay_ms is the expected time for a fault originating at this stage to
-    produce a measurable signal in direct downstream stages. The causal engine uses
-    these delays as edge weights when scoring root-cause candidates — a stage that
-    showed an anomaly 50ms before its downstream neighbour is a stronger candidate
-    than one that showed it 500ms before, given a 60ms propagation delay.
+    propagation_delay_ms is the expected time for a fault at this stage to surface in
+    direct downstream stages. The causal engine uses these as edge weights when scoring
+    root-cause candidates.
     """
 
     stage_id: str
@@ -32,16 +28,12 @@ class PipelineStage:
 
 class PipelineTopologyGraph:
     """
-    I'm wrapping networkx.DiGraph rather than subclassing it because I only want to
-    expose the domain-relevant surface (downstream resolution, ancestor queries) and
-    not leak networkx's full API to callers. Subclassing DiGraph would mean callers
-    could mutate the graph directly and bypass the acyclicity invariant I enforce at
-    construction time.
+    Wraps networkx.DiGraph rather than subclassing — exposes only the domain-relevant
+    surface (downstream resolution, ancestor queries) and prevents callers from
+    bypassing the acyclicity invariant enforced at construction time.
 
-    Acyclicity is validated once at construction rather than on every mutation because
-    topology is treated as immutable after loading — there's no add_stage() method.
-    If topology needs to change at runtime (not a current requirement), the right
-    pattern is to construct a new graph, not to mutate an existing one.
+    Acyclicity is validated once at construction because topology is treated as
+    immutable after loading. Runtime topology changes should construct a new graph.
     """
 
     def __init__(self, stages: List[PipelineStage]) -> None:
@@ -58,9 +50,8 @@ class PipelineTopologyGraph:
                         f"Stage '{stage.stage_id}' references unknown upstream "
                         f"'{upstream_id}' — check your topology config"
                     )
-                # Edge direction is upstream → downstream so that nx.descendants()
-                # from a node returns all stages that depend on it, matching the
-                # causal direction: a fault propagates downstream, not upstream.
+                # Edge direction is upstream → downstream so nx.descendants() from a node
+                # returns all stages that depend on it, matching causal direction.
                 self._graph.add_edge(
                     upstream_id,
                     stage.stage_id,
@@ -76,11 +67,9 @@ class PipelineTopologyGraph:
 
     def downstream_stages(self, stage_id: str) -> List[PipelineStage]:
         """
-        I'm returning descendants ordered by shortest topological path length from
-        stage_id rather than in arbitrary networkx iteration order. The causal engine
-        needs this ordering to prioritise nearby descendants when scoring anomaly
-        propagation — a stage two hops away is a weaker causal witness than one
-        directly connected.
+        Returns descendants ordered by shortest topological path length from stage_id.
+        The causal engine needs this ordering to prioritise nearby descendants when
+        scoring anomaly propagation.
         """
         if stage_id not in self._stages:
             raise KeyError(f"Unknown stage_id '{stage_id}'")
@@ -95,10 +84,8 @@ class PipelineTopologyGraph:
 
     def ancestors(self, stage_id: str) -> List[PipelineStage]:
         """
-        I'm exposing ancestors separately from downstream_stages because the causal
-        engine queries in the opposite direction: given a symptomatic stage, find
-        candidate root-cause stages upstream. Keeping both directions explicit avoids
-        callers having to reason about edge direction in the underlying digraph.
+        Returns ancestors sorted by reverse path length — nearest upstream first.
+        The causal engine queries in this direction to find root-cause candidates.
         """
         if stage_id not in self._stages:
             raise KeyError(f"Unknown stage_id '{stage_id}'")
@@ -125,21 +112,17 @@ class PipelineTopologyGraph:
 
 class TopologyLoader:
     """
-    I'm loading topology from YAML rather than Python so that scenario configs can
-    define different pipeline shapes without touching code. The alternative — hardcoding
-    topologies as Python objects — would mean every new test scenario requires a code
-    change and a commit, which breaks the reproducibility goal of ScenarioConfig.
-
-    The loader is a stateless class (all class methods) because it holds no mutable
-    state between loads — it's purely a parsing boundary.
+    Loads topology from YAML so scenario configs can define different pipeline shapes
+    without touching code. Stateless class (all class methods) — purely a parsing
+    boundary.
     """
 
     @classmethod
     def from_yaml(cls, path: Path) -> PipelineTopologyGraph:
         """
-        I'm validating that each required field exists before constructing PipelineStage
+        Validates that each required field exists before constructing PipelineStage
         objects so that missing fields raise a clear KeyError at load time rather than
-        surfacing as an AttributeError deep inside graph construction.
+        an AttributeError deep inside graph construction.
         """
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)

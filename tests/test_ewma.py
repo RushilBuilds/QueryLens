@@ -34,10 +34,9 @@ SIM_START = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # Monday 00:00 �
 
 def _flat_baseline(mean: float, std: float, stage_id: str = "src") -> SeasonalBaselineModel:
     """
-    I'm using a uniform (mean, std) across all 168 hour_of_week slots so tests
-    can insert events at any timestamp without worrying about seasonal slot
-    boundaries. Real baselines vary by slot; that integration is tested in
-    test_baseline.py.
+    Uniform (mean, std) across all 168 hour_of_week slots so tests can insert
+    events at any timestamp without worrying about seasonal slot boundaries.
+    Slot-varying behaviour is tested in test_baseline.py.
     """
     entries = {
         BaselineKey(stage_id, how, metric): BaselineEntry(
@@ -128,10 +127,9 @@ class TestEWMAArithmetic:
 
     def test_ewma_updates_correctly_after_one_step(self) -> None:
         """
-        I'm verifying the arithmetic directly: with λ=0.3 and z=(60-50)/10=1.0,
-        the EWMA after one step must equal λ*z = 0.3*1.0 = 0.3 (starting from 0).
-        A wrong formula (e.g. missing the (1-λ) term) would still compute 0.3
-        on the first step but diverge immediately on the second.
+        With λ=0.3 and z=(60-50)/10=1.0, the EWMA after one step must equal
+        λ*z = 0.3. A wrong formula (e.g. missing the (1-λ) term) still
+        computes 0.3 on the first step but diverges immediately on the second.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = EWMADetector(
@@ -161,11 +159,9 @@ class TestEWMAArithmetic:
 
     def test_control_limit_at_step_one_equals_lambda(self) -> None:
         """
-        I'm asserting the algebraic identity σ_1 = λ so that if someone
-        changes the variance formula the arithmetic tests catch it before
-        the detection tests do. The identity follows from:
-            σ²_1 = (λ/(2-λ)) * [1 - (1-λ)^2]
-                 = (λ/(2-λ)) * λ(2-λ) = λ²
+        Asserts the algebraic identity σ_1 = λ so a variance formula change
+        is caught here before the detection tests. Identity follows from:
+            σ²_1 = (λ/(2-λ)) * [1 - (1-λ)^2] = (λ/(2-λ)) * λ(2-λ) = λ²
         """
         lam = 0.3
         ewma_variance_at_1 = (lam / (2.0 - lam)) * (1.0 - (1.0 - lam) ** 2)
@@ -173,9 +169,9 @@ class TestEWMAArithmetic:
 
     def test_step_count_increments_on_missing_baseline(self) -> None:
         """
-        I'm confirming that when the baseline returns None (unknown stage),
-        the step count does NOT increment — the detector skips the update
-        entirely rather than advancing n with a no-op z-score.
+        When the baseline returns None, the step count must NOT increment —
+        the detector skips the update entirely rather than advancing n with
+        a no-op z-score.
         """
         detector = EWMADetector(
             EWMAConfig(smoothing=0.3, control_limit_width=3.0),
@@ -237,9 +233,8 @@ class TestEWMAImpulseDetection:
 
     def test_ewma_detects_downward_impulse_in_one_tick(self) -> None:
         """
-        I'm verifying the lower control limit fires for a sharp drop in
-        latency (which would indicate a stage returning suspiciously fast —
-        possible data loss or short-circuit in processing).
+        Lower control limit fires for a sharp latency drop — indicating a
+        stage returning suspiciously fast, possible data loss or short-circuit.
         """
         baseline = _flat_baseline(self.BASELINE_MEAN, self.BASELINE_STD)
         detector = EWMADetector(
@@ -258,9 +253,9 @@ class TestEWMAImpulseDetection:
 
     def test_cusum_does_not_fire_on_same_impulse(self) -> None:
         """
-        I'm asserting CUSUM stays silent on the impulse that fires EWMA. This
-        is the key complementarity property: if CUSUM also fired here, one of
-        the two detectors would be redundant and we would not need both.
+        CUSUM must stay silent on the impulse that fires EWMA — the key
+        complementarity property. If CUSUM also fired here, one of the two
+        detectors would be redundant.
         """
         baseline = _flat_baseline(self.BASELINE_MEAN, self.BASELINE_STD)
         cusum = CUSUMDetector(
@@ -280,9 +275,9 @@ class TestEWMAImpulseDetection:
 
     def test_sub_threshold_impulse_does_not_fire(self) -> None:
         """
-        I'm confirming that a z-score of exactly L does not fire — the
-        condition is strict inequality (>) not >=. At z=L, Z_1=λ*L and
-        UCL_1=L*λ, so Z_1 == UCL_1 and the condition is false.
+        A z-score of exactly L must not fire — condition is strict inequality
+        (>). At z=L, Z_1=λ*L and UCL_1=L*λ, so Z_1 == UCL_1 and the
+        condition is false.
         """
         baseline = _flat_baseline(self.BASELINE_MEAN, self.BASELINE_STD)
         detector = EWMADetector(
@@ -304,10 +299,10 @@ class TestEWMANoFire:
 
     def test_on_target_events_produce_no_anomaly(self) -> None:
         """
-        I'm feeding 200 events exactly at the baseline mean (z=0). The EWMA
-        update collapses to λ*0 + (1-λ)*0 = 0 every tick, so the statistic
-        stays at 0 permanently. Any fire here would indicate the control limit
-        formula is computing a negative or zero UCL.
+        200 events at baseline mean (z=0). The EWMA update collapses to
+        λ*0 + (1-λ)*0 = 0 every tick, so the statistic stays at 0 permanently.
+        Any fire here indicates the control limit formula computes a negative
+        or zero UCL.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = EWMADetector(
@@ -319,8 +314,8 @@ class TestEWMANoFire:
 
     def test_missing_baseline_skips_update_silently(self) -> None:
         """
-        I'm verifying that an event for a stage with no baseline entry produces
-        no anomaly and no exception. The update must be a no-op, not a crash.
+        An event for a stage with no baseline entry must produce no anomaly
+        and no exception — a no-op, not a crash.
         """
         detector = EWMADetector(
             EWMAConfig(smoothing=0.3, control_limit_width=3.0),
@@ -339,9 +334,9 @@ class TestEWMAReset:
 
     def test_ewma_value_resets_to_zero_after_fire(self) -> None:
         """
-        I'm verifying the EWMA value resets to 0 after firing so the detector
-        re-arms from centre. Without a reset, a sustained high z-score would
-        fire every tick once the first threshold crossing occurs.
+        EWMA value must reset to 0 after firing so the detector re-arms from
+        centre. Without a reset, a sustained high z-score fires every tick
+        after the first threshold crossing.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = EWMADetector(
@@ -354,9 +349,9 @@ class TestEWMAReset:
 
     def test_step_count_preserved_after_fire(self) -> None:
         """
-        I'm confirming n is NOT reset after a fire so the control limits stay
-        at their mature (wider) values after re-arm. Resetting n would tighten
-        the limits and could cause spurious fires during the re-arm period.
+        n must NOT reset after a fire so control limits stay at their mature
+        (wider) values after re-arm. Resetting n tightens the limits and
+        can cause spurious fires during the re-arm period.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = EWMADetector(
@@ -369,10 +364,9 @@ class TestEWMAReset:
 
     def test_explicit_reset_clears_both_value_and_count(self) -> None:
         """
-        I'm verifying the explicit reset() fully clears state (value and n)
-        unlike the post-fire reset. The healing layer calls reset() after
-        remediating a fault; it needs the detector to start fresh, including
-        tight startup control limits on the next event.
+        reset() fully clears both value and n, unlike the post-fire reset.
+        The healing layer calls reset() after remediating a fault and needs
+        the detector to restart with tight startup control limits.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = EWMADetector(
@@ -400,9 +394,9 @@ class TestEWMAMultiStage:
 
     def test_stage_states_are_independent(self) -> None:
         """
-        I'm feeding spike events to stage_a only and asserting stage_b's EWMA
-        stays at zero. A shared state dict with a key bug (e.g. ignoring
-        stage_id) would contaminate stage_b.
+        Spike events sent to stage_a only — stage_b's EWMA must stay at zero.
+        A shared state dict with a key bug (e.g. ignoring stage_id) would
+        contaminate stage_b.
         """
         entries: dict = {}
         for stage in ("stage_a", "stage_b"):

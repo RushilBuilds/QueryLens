@@ -10,22 +10,19 @@ from simulator.models import PipelineEvent
 @dataclass(frozen=True)
 class AnomalyEvent:
     """
-    I'm using a single AnomalyEvent schema for both CUSUM and EWMA rather than
-    separate dataclasses per detector. The AnomalyEventBus in Milestone 13
-    publishes to a single Redpanda topic regardless of which detector fired —
-    separate schemas would require the bus to handle two types and the
-    downstream causal layer to union them. A shared schema with a
-    detector_type discriminator keeps the bus and consumer code simple.
+    Single schema for both CUSUM and EWMA rather than separate dataclasses —
+    the AnomalyEventBus publishes to one Redpanda topic regardless of which
+    detector fired. Separate schemas would force the bus to union two types and
+    the causal layer to do the same. A detector_type discriminator keeps both
+    simple.
 
-    detector_value carries the raw accumulator (CUSUM S_upper/S_lower) or the
-    EWMA statistic depending on detector_type. The field is intentionally
-    named 'detector_value' rather than 'cusum_value' or 'ewma_value' so that
-    callers that only need to compare against threshold work identically for
-    both detectors without branching on detector_type.
+    detector_value is named generically rather than 'cusum_value' or
+    'ewma_value' so callers that only compare against threshold work identically
+    for both detectors without branching.
 
-    fault_label propagates from the originating PipelineEvent so that the M14
-    benchmark can compute precision and recall against ground-truth fault labels
-    without joining back to pipeline_metrics on every query.
+    fault_label propagates from the originating PipelineEvent so the benchmark
+    can compute precision/recall against ground-truth labels without joining
+    back to pipeline_metrics on every query.
     """
 
     detector_type: str                    # 'cusum' or 'ewma'
@@ -41,11 +38,10 @@ class AnomalyEvent:
 
 def extract_metric(event: PipelineEvent, metric: str) -> float:
     """
-    I'm extracting metric values here rather than inside each detector so that
-    adding a new metric (e.g. 'payload_bytes') only requires changing this
-    function — not every detector class. The alternative is metric extraction
-    logic duplicated in CUSUMDetector and EWMADetector, which would drift out
-    of sync the moment someone adds a metric to one but forgets the other.
+    Central extraction point so adding a new metric only requires changing
+    this function, not every detector class. Extraction logic duplicated in
+    CUSUMDetector and EWMADetector would drift out of sync the moment someone
+    adds a metric to one and forgets the other.
     """
     if metric == "latency_ms":
         return event.latency_ms

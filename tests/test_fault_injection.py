@@ -13,9 +13,8 @@ from simulator.fault_injection import (
 from simulator.models import PipelineEvent
 from simulator.workload import PoissonEventGenerator, WorkloadProfile
 
-# I'm fixing the simulation start to a known timestamp so every active-window
-# calculation is deterministic. Tests that need events outside the fault window
-# can set start_offset_s to a value larger than the total event span.
+# Fixed simulation start ensures every active-window calculation is deterministic.
+# Tests that need events outside the fault window use start_offset_s > total event span.
 SIM_START = datetime(2024, 1, 1, 0, 0, 0)
 N_EVENTS = 1_000
 
@@ -25,10 +24,9 @@ def _make_baseline_events(
     n: int = N_EVENTS,
 ) -> List[PipelineEvent]:
     """
-    I'm generating baseline events via PoissonEventGenerator rather than constructing
-    PipelineEvent objects by hand so the latency, payload, and row_count distributions
-    match what the simulator will actually produce. Hand-crafted constants would make
-    the statistical assertions fragile if WorkloadProfile defaults change.
+    Events generated via PoissonEventGenerator rather than hand-crafted constants
+    so distributions match what the simulator produces. Hard-coded values would make
+    statistical assertions fragile if WorkloadProfile defaults change.
     """
     profile = WorkloadProfile(
         arrival_rate_lambda=10.0,
@@ -43,9 +41,8 @@ def _make_baseline_events(
 
 def _full_window_spec(fault_type: str, magnitude: float, seed: int = 0) -> FaultSpec:
     """
-    I'm factoring this out because every statistical test needs a fault that covers
-    all N_EVENTS. Repeating the start_offset_s=0 / duration_s=1e9 pattern across
-    every test would obscure what each test is actually asserting.
+    Every statistical test needs a fault covering all N_EVENTS. Factored out to
+    avoid repeating the start_offset_s=0 / duration_s=1e9 boilerplate.
     """
     return FaultSpec(
         fault_type=fault_type,
@@ -64,10 +61,9 @@ def _full_window_spec(fault_type: str, magnitude: float, seed: int = 0) -> Fault
 
 def test_inject_returns_original_object_outside_fault_window() -> None:
     """
-    I'm asserting object identity (not just equality) because the inject() docstring
-    documents that the original object is returned unchanged when no fault is active.
-    This is a performance contract, not just a correctness one — allocating a copy for
-    every fault-free event would add measurable overhead in the simulator hot loop.
+    Object identity asserted (not just equality): inject() must return the original
+    object unchanged when no fault is active. Allocating a copy for every fault-free
+    event would add measurable overhead in the simulator hot loop.
     """
     events = _make_baseline_events()
     spec = FaultSpec(
@@ -91,11 +87,9 @@ def test_inject_returns_original_object_outside_fault_window() -> None:
 
 def test_inject_sets_fault_label_on_all_events_in_window() -> None:
     """
-    I'm verifying that fault_label is set on every event in the window, including
-    probabilistic faults where the individual event was not mutated. The label is
-    ground truth about the fault window, not the per-event mutation — a detector that
-    misses a fault-window event is a false negative regardless of whether that event
-    happened to keep its normal status.
+    fault_label must be set on every event in the window, including probabilistic
+    faults where the individual event was not mutated. The label is ground truth
+    about the fault window, not the per-event mutation.
     """
     events = _make_baseline_events()
     spec = _full_window_spec("error_burst", magnitude=0.5, seed=7)
@@ -112,9 +106,9 @@ def test_inject_sets_fault_label_on_all_events_in_window() -> None:
 
 def test_inject_does_not_mutate_events_for_wrong_stage() -> None:
     """
-    I'm testing that a fault targeting stage_b does not touch events from stage_a.
-    This is a cross-stage isolation check — without it a misconfigured target_stage_id
-    would silently corrupt unrelated stages and produce phantom anomalies.
+    Cross-stage isolation: a fault targeting stage_b must not touch stage_a events.
+    A misconfigured target_stage_id would silently corrupt unrelated stages and
+    produce phantom anomalies.
     """
     events = _make_baseline_events(stage_id="stage_a")
     spec = FaultSpec(
@@ -138,10 +132,9 @@ def test_inject_does_not_mutate_events_for_wrong_stage() -> None:
 
 def test_unknown_fault_type_raises_value_error() -> None:
     """
-    I'm testing that an unrecognised fault_type raises ValueError rather than silently
-    producing a no-op or partially mutated event. Silent failures here would mean a
-    typo in a scenario YAML produces a scenario with no faults, passing all accuracy
-    benchmarks against ground-truth labels that were never actually injected.
+    An unrecognised fault_type must raise ValueError rather than silently producing
+    a no-op. A silent failure would mean a YAML typo produces a scenario with no
+    faults, passing accuracy benchmarks against labels that were never injected.
     """
     events = _make_baseline_events()
     spec = _full_window_spec("not_a_real_fault", magnitude=1.0)
@@ -159,12 +152,10 @@ def test_unknown_fault_type_raises_value_error() -> None:
 
 def test_latency_spike_raises_p99() -> None:
     """
-    I'm asserting p99 rather than mean because the latency_spike fault type is
-    designed to move the tail of the latency distribution, which is what CUSUM and
-    EWMA detectors will observe. At magnitude=5.0 with ±20% jitter, the minimum
-    applied multiplier is 4.0, so injected p99 must be at least 3× baseline p99.
-    Using 3× instead of 4× gives headroom for the tail's natural variance while still
-    requiring a meaningful shift that no noise-driven fluctuation would produce.
+    p99 asserted rather than mean: latency_spike is designed to move the tail, which
+    is what CUSUM and EWMA observe. At magnitude=5.0 with ±20% jitter, the minimum
+    multiplier is 4.0, so injected p99 must be at least 3× baseline p99 — the 3×
+    threshold gives headroom for tail variance without accepting noise-driven shifts.
     """
     events = _make_baseline_events()
     baseline_p99 = float(np.percentile([e.latency_ms for e in events], 99))
@@ -184,11 +175,10 @@ def test_latency_spike_raises_p99() -> None:
 
 def test_dropped_connection_produces_expected_error_rate() -> None:
     """
-    I'm testing both the error rate and the zero-payload invariant because
-    dropped_connection has two observable signatures: the rate of error events and the
-    fact that dropped events carry no data. Testing only the rate would miss an
-    implementation bug where status="error" is set but row_count and payload_bytes
-    are preserved, which produces a false throughput reading in downstream metrics.
+    Both error rate and zero-payload invariant tested: dropped_connection has two
+    observable signatures. Testing only the rate would miss a bug where status="error"
+    is set but row_count and payload_bytes are preserved, producing a false throughput
+    reading in downstream metrics.
     """
     events = _make_baseline_events()
     drop_probability = 0.9
@@ -215,12 +205,10 @@ def test_dropped_connection_produces_expected_error_rate() -> None:
 
 def test_schema_drift_reduces_mean_row_count() -> None:
     """
-    I'm computing the reduction relative to the baseline mean rather than asserting
-    an absolute value because the baseline row_count is drawn from a Poisson(1000)
-    distribution — its mean is ~1000 but varies with the seed. Using a relative
-    threshold makes the test seed-independent. At magnitude=0.6, surviving_fraction
-    is 0.4, so the injected mean must be ≤ 50% of baseline (allowing some tolerance
-    for integer truncation and the seed-driven baseline variance).
+    Reduction relative to baseline mean rather than an absolute value: baseline
+    row_count is Poisson(1000) and varies with seed. At magnitude=0.6,
+    surviving_fraction=0.4, so injected mean must be ≤ 50% of baseline, with
+    tolerance for integer truncation and seed-driven baseline variance.
     """
     events = _make_baseline_events()
     baseline_mean_rows = float(np.mean([e.row_count for e in events]))
@@ -246,12 +234,10 @@ def test_schema_drift_reduces_mean_row_count() -> None:
 
 def test_partition_skew_inflates_mean_payload() -> None:
     """
-    I'm testing payload_bytes inflation because that is the defining observable of
-    partition skew — one partition receives a disproportionate share of the data volume.
-    At magnitude=4.0 the expected mean payload is 4× baseline; asserting ≥ 3.5×
-    tolerates the integer truncation of payload_bytes without masking implementation
-    bugs where magnitude is applied to the wrong field or applied as addition rather
-    than multiplication.
+    payload_bytes inflation is the defining observable of partition skew. At
+    magnitude=4.0 expected mean payload is 4× baseline; the ≥ 3.5× threshold
+    tolerates integer truncation without masking bugs where magnitude is applied
+    to the wrong field or as addition rather than multiplication.
     """
     events = _make_baseline_events()
     baseline_mean_payload = float(np.mean([e.payload_bytes for e in events]))
@@ -271,11 +257,10 @@ def test_partition_skew_inflates_mean_payload() -> None:
 
 def test_throughput_collapse_reduces_mean_row_count() -> None:
     """
-    I'm asserting that mean row_count falls to ≤ 20% of baseline at magnitude=8.0
-    (theoretical reduction is 1/8 = 12.5%). The 20% ceiling gives headroom for the
-    floor-at-1 rule applied to events that would otherwise reach row_count=0, which
-    raises the empirical mean slightly above the theoretical 1/magnitude fraction when
-    the baseline row distribution has a long left tail.
+    At magnitude=8.0 theoretical reduction is 1/8 = 12.5%; the ≤ 20% ceiling gives
+    headroom for the floor-at-1 rule applied to events that would otherwise hit
+    row_count=0, which raises the empirical mean above 12.5% when the baseline has
+    a long left tail.
     """
     events = _make_baseline_events()
     baseline_mean_rows = float(np.mean([e.row_count for e in events]))
@@ -295,11 +280,10 @@ def test_throughput_collapse_reduces_mean_row_count() -> None:
 
 def test_error_burst_produces_expected_error_rate_and_preserves_data() -> None:
     """
-    I'm testing two invariants together because error_burst's signature is specifically
-    the combination of a high error rate WITH preserved data volumes. Testing only the
-    error rate would not distinguish error_burst from dropped_connection. The causal
-    engine uses precisely this distinction to differentiate processing failures from
-    network failures when scoring root-cause candidates.
+    Two invariants tested together: error_burst's signature is high error rate WITH
+    preserved data volumes. Testing only the rate would not distinguish it from
+    dropped_connection; the causal engine uses exactly this distinction to differentiate
+    processing failures from network failures.
     """
     events = _make_baseline_events()
     error_rate = 0.8
@@ -335,10 +319,9 @@ def test_error_burst_produces_expected_error_rate_and_preserves_data() -> None:
 
 def test_event_at_window_boundary_is_included() -> None:
     """
-    I'm testing the inclusive boundary condition (start_offset_s <= offset <= end)
-    because an off-by-one on either boundary would silently exclude the first or last
-    event from the fault window and bias ground-truth label counts downward in
-    benchmark runs.
+    Inclusive boundary (start_offset_s <= offset <= end). An off-by-one on either
+    edge would silently exclude the first or last event and bias ground-truth label
+    counts downward in benchmark runs.
     """
     # Create one event whose offset lands exactly at the fault window start.
     event = PipelineEvent(

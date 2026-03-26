@@ -16,15 +16,15 @@ from simulator.workload import PoissonEventGenerator, WorkloadProfile
 
 class SimulationClock:
     """
-    I'm computing current_time as start_time + tick_count * tick_interval rather than
-    accumulating it via repeated timedelta addition. Repeated floating-point addition
-    drifts: after 100,000 ticks at 1ms each, naive accumulation can diverge by tens of
-    microseconds depending on the platform's floating-point behaviour. Multiplying from
-    a fixed origin keeps every tick's timestamp exactly reproducible across machines.
+    Computes current_time as start_time + tick_count * tick_interval rather than
+    accumulating via repeated timedelta addition. Repeated floating-point addition
+    drifts — after 100,000 ticks at 1ms each, naive accumulation can diverge by tens
+    of microseconds. Multiplying from a fixed origin keeps every timestamp exactly
+    reproducible.
 
-    The clock intentionally has no relationship to wall time. Any component that needs
-    a timestamp must call clock.current_time — calling datetime.utcnow() anywhere in
-    the simulator would break reproducibility silently.
+    Has no relationship to wall time. Any component that needs a timestamp must call
+    clock.current_time — calling datetime.utcnow() anywhere in the simulator would
+    break reproducibility silently.
     """
 
     def __init__(self, start_time: datetime, tick_interval_ms: float) -> None:
@@ -56,19 +56,15 @@ class SimulationClock:
 
 class SimulatorEngine:
     """
-    I'm pre-generating all events for the full simulation window upfront rather than
-    generating per-tick. The per-tick approach would require calling
-    PoissonEventGenerator.generate() once per tick per stage, which restarts the
-    Poisson inter-arrival chain at each tick boundary — that breaks the statistical
-    properties of the Poisson process by introducing artificial gaps at tick edges.
-    Pre-generating and filtering to the window preserves continuous inter-arrival
-    statistics across tick boundaries.
+    Pre-generates all events for the full simulation window upfront rather than
+    per-tick. Per-tick generation would restart the Poisson inter-arrival chain at
+    each tick boundary, breaking the statistical properties of the Poisson process.
+    Pre-generating and filtering preserves continuous inter-arrival statistics.
 
     Stage RNGs are derived from the master seed via np.random.SeedSequence.spawn().
-    This guarantees that each stage's RNG is statistically independent of every other
-    stage's RNG, and that adding or removing a stage from the topology does not change
-    the RNG sequence of any other stage — both properties would break if I derived
-    stage seeds by incrementing a counter from the master seed.
+    This guarantees each stage's RNG is statistically independent of every other
+    stage's, and that adding or removing a stage does not change any other stage's
+    RNG sequence.
     """
 
     def __init__(
@@ -83,10 +79,8 @@ class SimulatorEngine:
         self._workload_profile = workload_profile
         self._fault_injector = fault_injector
 
-        # I'm spawning one child SeedSequence per stage rather than sharing a single
-        # RNG across stages. Shared state would mean that event generation for one
-        # stage consumes draws that would otherwise go to another stage, making the
-        # per-stage event streams dependent on stage ordering in the topology.
+        # Spawn one child SeedSequence per stage rather than sharing a single RNG.
+        # Shared state would make per-stage streams dependent on stage ordering.
         stages = topology.all_stages
         seed_seq = np.random.SeedSequence(rng_seed)
         stage_seeds = seed_seq.spawn(len(stages))
@@ -105,16 +99,12 @@ class SimulatorEngine:
 
     def run(self, n_ticks: int) -> Iterator[PipelineEvent]:
         """
-        I'm using a generous overcount of (2 × expected mean + 100) for the number
-        of events to pre-generate per stage. By the Chernoff bound, the probability
-        that a Poisson(μ) variable exceeds 2μ is at most exp(−μ/3), which for any
-        μ > 30 is below 10^-4 and falls off exponentially from there. The +100 covers
-        the degenerate case where n_ticks is very small (μ < 1) and the multiplier
-        alone would underestimate.
+        Uses a generous overcount of (2 × expected mean + 100) for pre-generation.
+        By the Chernoff bound, P(Poisson(μ) > 2μ) ≤ exp(−μ/3), which for any μ > 30
+        is below 10^-4. The +100 covers the degenerate case where n_ticks is very small.
 
         Events are sorted globally by event_time before injection so the FaultInjector
-        sees them in timestamp order. This matters for fault types that track per-event
-        state (none currently, but important for multi-fault composition in the future).
+        sees them in timestamp order.
         """
         tick_interval_s = self._clock.tick_interval_ms / 1000.0
         sim_duration_s = n_ticks * tick_interval_s
@@ -151,17 +141,13 @@ class SimulatorEngine:
 
 class ScenarioConfig:
     """
-    I'm making ScenarioConfig a thin loader that validates YAML fields and delegates
-    all construction to the domain classes rather than building a parallel config
-    object hierarchy. The alternative — a ScenarioConfig dataclass that mirrors every
-    field of WorkloadProfile, FaultSpec, etc. — would create a second schema to keep
-    in sync with the domain classes and provide no additional value.
+    Thin loader that validates YAML fields and delegates construction to domain classes.
+    A ScenarioConfig dataclass mirroring every field of WorkloadProfile and FaultSpec
+    would create a second schema to keep in sync with no additional value.
 
-    build_engine() returns a freshly constructed SimulatorEngine with a clean RNG
-    state each time it is called. This is the reproducibility contract: given the
-    same ScenarioConfig, every call to build_engine().run(n_ticks) produces an
-    identical event stream. Tests that need two independent runs must call
-    build_engine() twice rather than calling run() twice on the same engine.
+    build_engine() returns a freshly constructed SimulatorEngine with a clean RNG state
+    each time — the reproducibility contract. Tests needing two independent runs must
+    call build_engine() twice.
     """
 
     def __init__(
@@ -189,11 +175,9 @@ class ScenarioConfig:
     @classmethod
     def load(cls, path: Path) -> ScenarioConfig:
         """
-        I'm resolving the topology path relative to the scenario YAML's parent
-        directory rather than the process working directory. Relative-to-cwd paths
-        would make the scenario files non-portable — the same YAML would work from
-        the repo root but fail from any other working directory. Parent-relative
-        paths make the scenario file self-contained.
+        Resolves the topology path relative to the scenario YAML's parent directory.
+        Relative-to-cwd paths would make scenario files non-portable — the same YAML
+        would work from the repo root but fail from any other working directory.
         """
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
@@ -246,11 +230,10 @@ class ScenarioConfig:
 
     def build_engine(self) -> SimulatorEngine:
         """
-        I'm constructing a fresh SimulationClock and FaultInjector on every call so
-        that each engine starts with a clean tick_count=0 and unadvanced per-spec
-        RNGs. Reusing a clock or injector across engine instances would let the second
-        run start from the state left by the first, breaking the reproducibility
-        guarantee.
+        Constructs a fresh SimulationClock and FaultInjector on every call so each
+        engine starts with tick_count=0 and unadvanced per-spec RNGs. Reusing either
+        across instances would let the second run start from the state left by the
+        first, breaking the reproducibility guarantee.
         """
         clock = SimulationClock(
             start_time=self._simulation_start,

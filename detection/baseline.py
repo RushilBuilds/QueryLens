@@ -16,11 +16,10 @@ _METRICS = ("latency_ms", "row_count", "error_rate")
 
 def _hour_of_week(dt: datetime) -> int:
     """
-    I'm using Python's datetime.weekday() (Monday=0, Sunday=6) rather than
-    isoweekday() (Monday=1, Sunday=7) so the resulting hour_of_week runs from
-    0 (Monday 00:00) to 167 (Sunday 23:00) with no off-by-one correction.
-    PostgreSQL's EXTRACT(DOW ...) uses Sunday=0, so the fitter converts it to
-    ISO weekday with (dow + 6) % 7 to match this function exactly.
+    Uses datetime.weekday() (Monday=0) rather than isoweekday() (Monday=1) so
+    hour_of_week runs 0–167 with no off-by-one correction. PostgreSQL's
+    EXTRACT(DOW) uses Sunday=0, so the fitter converts it with (dow + 6) % 7
+    to match this function exactly.
     """
     return dt.weekday() * 24 + dt.hour
 
@@ -33,11 +32,10 @@ def _hour_of_week(dt: datetime) -> int:
 @dataclass(frozen=True)
 class BaselineKey:
     """
-    I'm using a frozen dataclass rather than a plain tuple as the dict key so
-    that the three fields are named at every call site. A tuple key like
-    ("src", 8, "latency_ms") is indistinguishable from ("latency_ms", 8, "src")
-    to the type checker — a mismatch would silently produce a cache miss and
-    return None z-scores without any error.
+    Frozen dataclass rather than a plain tuple so fields are named at every
+    call site. A tuple like ("src", 8, "latency_ms") is indistinguishable from
+    ("latency_ms", 8, "src") to the type checker — a mismatch silently produces
+    a cache miss and returns None z-scores.
     """
 
     stage_id: str
@@ -60,16 +58,13 @@ class BaselineEntry:
 
 class SeasonalBaselineModel:
     """
-    I'm keeping this class as a pure in-memory lookup with no DB dependency so
-    that detectors can call z_score() on every event without touching the
-    database on the hot path. The DB interaction is entirely in BaselineFitter;
-    SeasonalBaselineModel is the read-only result of a fit.
+    Pure in-memory lookup with no DB dependency so detectors can call z_score()
+    on every event without touching the database on the hot path. All DB
+    interaction is in BaselineFitter; this class is the read-only result of a fit.
 
     z_score() returns None when baseline_std == 0.0 rather than raising or
-    returning infinity. A std of zero means either (a) only one sample was
-    seen in that slot, or (b) every historical value was identical. In either
-    case, a z-score is not interpretable — CUSUM and EWMA should skip the
-    update for that slot rather than accumulate a nonsensical value.
+    returning infinity. A zero std means either one sample or all-identical
+    values — the z-score is not interpretable and callers should skip the update.
     """
 
     def __init__(self, entries: Dict[BaselineKey, BaselineEntry]) -> None:
@@ -89,10 +84,9 @@ class SeasonalBaselineModel:
         value: float,
     ) -> Optional[float]:
         """
-        I'm computing hour_of_week from event_time rather than from wall time
-        because the detection layer processes historical replays as well as
-        live events. Using wall time would assign the wrong seasonal slot to
-        replayed events from a different hour, producing incorrect z-scores.
+        Computes hour_of_week from event_time rather than wall time because the
+        detection layer processes historical replays as well as live events.
+        Wall time would assign the wrong seasonal slot to replayed events.
         """
         key = BaselineKey(
             stage_id=stage_id,
@@ -112,17 +106,13 @@ class SeasonalBaselineModel:
 
 class BaselineFitter:
     """
-    I'm querying pipeline_metrics with a Python-side cutoff datetime rather
-    than `NOW() - INTERVAL '28 days'` in SQL because:
-    1. It makes the query testable — tests can inspect exactly which records
-       fall within the window without depending on database server time.
-    2. It avoids parameterising an INTERVAL, which requires casting in
-       SQLAlchemy's text() API (':days || ' days')::INTERVAL) and is fragile
-       across Postgres versions.
+    Uses a Python-side cutoff datetime rather than `NOW() - INTERVAL '28 days'`
+    in SQL so tests can inspect the exact window without depending on DB server
+    time, and to avoid SQLAlchemy's fragile INTERVAL parameterisation across
+    Postgres versions.
 
-    The fitting query uses a single GROUP BY pass rather than three separate
-    per-metric queries. One round trip to the database is faster than three,
-    and the group-by cost is identical whether we aggregate one or three
+    Single GROUP BY pass rather than three per-metric queries — one round trip
+    is faster than three, and the group-by cost is identical for one or three
     columns in the SELECT list.
     """
 
@@ -168,14 +158,12 @@ class BaselineFitter:
 
     def fit_and_persist(self) -> SeasonalBaselineModel:
         """
-        I'm separating the SELECT and INSERT into two transactions rather than
-        using a single INSERT ... SELECT because the aggregation query is
-        read-only and long-running — holding a write lock for its entire
-        duration would block concurrent ingestion writes. The two-transaction
-        approach means the window of data read may differ slightly from the
-        moment of write (any new rows arriving between the two calls are
-        excluded), which is acceptable: baseline drift of a few events per
-        hour has no detectable effect on z-score accuracy.
+        SELECT and INSERT are separate transactions rather than INSERT ... SELECT
+        because the aggregation query is read-only and long-running — holding a
+        write lock for its duration would block ingestion writes. The two-
+        transaction window means rows arriving between SELECT and INSERT are
+        excluded, which is acceptable: baseline drift of a few events per hour
+        has no detectable effect on z-score accuracy.
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=self._lookback_days)
         fitted_at = datetime.now(timezone.utc)
@@ -187,10 +175,9 @@ class BaselineFitter:
         upsert_params: List[dict] = []
 
         for row in rows:
-            # I'm converting PostgreSQL's Sunday=0 DOW to ISO Monday=0 here
-            # rather than in SQL because the Python modulo expression is easier
-            # to audit than a SQL CASE expression, and this conversion runs
-            # once per (stage, slot) pair during fitting — not on the hot path.
+            # Convert PostgreSQL's Sunday=0 DOW to ISO Monday=0 in Python rather
+            # than SQL — the modulo expression is easier to audit than a SQL CASE,
+            # and this runs once per (stage, slot) during fitting, not on the hot path.
             iso_dow = (int(row.dow) + 6) % 7
             how = iso_dow * 24 + int(row.hod)
             n = int(row.sample_count)
@@ -239,15 +226,13 @@ class BaselineFitter:
 
 class BaselineStore:
     """
-    I'm using time.monotonic() for the TTL check rather than datetime.now()
-    because monotonic time is guaranteed to never go backwards, whereas wall
-    time can jump forward (NTP sync) or backward (DST transition). A backward
-    jump in wall time could make the cache appear perpetually fresh, silently
-    serving stale baselines until the next process restart. Monotonic time has
-    no such failure mode.
+    Uses time.monotonic() for the TTL check rather than datetime.now() because
+    monotonic time never goes backwards. Wall time can jump forward (NTP) or
+    backward (DST), making the cache appear perpetually fresh and silently
+    serving stale baselines until the next restart.
 
     get_model() is not thread-safe by design — the ingestion worker and
-    detection loop both run in a single thread. Adding a lock would be premature
+    detection loop both run in a single thread. A lock would be premature
     complexity for a component that will never be called from multiple threads.
     """
 
@@ -261,11 +246,10 @@ class BaselineStore:
 
     def get_model(self) -> SeasonalBaselineModel:
         """
-        I'm re-fitting lazily (on first call and when TTL expires) rather than
-        on a background timer because the detection loop is synchronous. A
-        background timer would require a thread and a lock, adding complexity
-        with no latency benefit — the fit takes <100ms and the detection tick
-        is 1 second.
+        Re-fits lazily (on first call and on TTL expiry) rather than on a
+        background timer because the detection loop is synchronous. A timer
+        would require a thread and a lock with no latency benefit — the fit
+        takes <100ms and the detection tick is 1 second.
         """
         now = time.monotonic()
         if self._model is None or (now - self._last_fitted_monotonic) >= self._ttl_s:

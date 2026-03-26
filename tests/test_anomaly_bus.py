@@ -1,17 +1,14 @@
 """
 Integration test for AnomalyEventBus and AnomalyPersister.
 
-I'm running this against real Redpanda and PostgreSQL containers rather than
-mocking either because the contract we're asserting is end-to-end: an
-AnomalyEvent fired by a detector must land in both Redpanda (for the causal
-layer to consume) and PostgreSQL (for audit and replay). Mocking the broker
-or the DB session would verify the serialization glue but not the delivery
-guarantee.
+Runs against real Redpanda and PostgreSQL containers rather than mocking
+either — the contract is end-to-end: an AnomalyEvent fired by a detector
+must land in both Redpanda (for the causal layer) and PostgreSQL (for audit
+and replay). Mocking verifies serialization glue but not delivery guarantees.
 
-The fault_label alignment test is the correctness anchor: the anomaly emitted
-by the detector must carry the same fault_label as the PipelineEvent that
-triggered it, and that label must survive serialization → Redpanda →
-deserialization → PostgreSQL write intact.
+The fault_label alignment test is the correctness anchor: the label from the
+PipelineEvent must survive serialization → Redpanda → deserialization →
+PostgreSQL write intact.
 """
 from __future__ import annotations
 
@@ -68,9 +65,9 @@ def _flat_baseline(
     mean: float, std: float, stage_id: str = "src"
 ) -> SeasonalBaselineModel:
     """
-    I'm using a uniform baseline across all 168 hour_of_week slots so that
-    test events inserted at any timestamp produce a deterministic z-score. The
-    goal here is exercising the bus and persister, not the baseline logic.
+    Uniform baseline across all 168 hour_of_week slots so test events at any
+    timestamp produce a deterministic z-score. Exercises the bus and persister,
+    not the baseline logic.
     """
     entries = {
         BaselineKey(stage_id, how, metric): BaselineEntry(
@@ -103,9 +100,9 @@ def _run_detectors(
     baseline: SeasonalBaselineModel,
 ) -> List[AnomalyEvent]:
     """
-    I'm running both CUSUM and EWMA on the same event stream and collecting
-    all fired AnomalyEvents so the integration test confirms both detector
-    outputs flow through the bus and persister identically.
+    Runs both CUSUM and EWMA on the same event stream and collects all fired
+    AnomalyEvents so the integration test confirms both detector outputs flow
+    through the bus and persister identically.
     """
     cusum = CUSUMDetector(
         CUSUMConfig(decision_threshold=4.0, slack_parameter=0.5, metrics=("latency_ms",)),
@@ -130,11 +127,9 @@ def _run_detectors(
 @pytest.fixture(scope="module")
 def infra():
     """
-    I'm starting both containers once per module and sharing them across all
-    integration tests to avoid paying the container startup cost (10–15s) per
-    test. The Kafka broker and Postgres instance are stateless between tests
-    as long as each test uses a unique consumer group id and does not modify
-    the schema.
+    Starts both containers once per module to avoid paying the 10–15s startup
+    cost per test. The broker and Postgres instance are stateless between tests
+    as long as each test uses a unique consumer group id.
     """
     with KafkaContainer(KAFKA_IMAGE).with_kraft() as kafka, \
          PostgresContainer(POSTGRES_IMAGE) as pg:
@@ -159,10 +154,9 @@ class TestAnomalyEventSerializer:
 
     def test_round_trip_preserves_all_fields(self) -> None:
         """
-        I'm verifying the full field round-trip here rather than just checking
-        that serialization doesn't raise. A serializer that drops fault_label
-        silently would pass a 'no exception' test but break fault_label alignment
-        in the persister.
+        Full field round-trip rather than just checking for no exception — a
+        serializer that silently drops fault_label would pass a no-exception
+        test but break fault_label alignment in the persister.
         """
         anomaly = AnomalyEvent(
             detector_type="cusum",
@@ -217,10 +211,9 @@ class TestAnomalyBusAndPersisterIntegration:
 
     def test_anomalies_land_in_redpanda_and_postgres(self, infra: dict) -> None:
         """
-        I'm asserting both destinations in one test because the two-destination
-        guarantee is the entire point of M13 — verifying each destination in
-        isolation with mocks would not catch a scenario where the persister
-        consumes but fails to write, or the bus flushes but the Kafka broker
+        Both destinations are asserted together because the two-destination
+        guarantee is the point — mocking each in isolation would miss a persister
+        that consumes but fails to write, or a bus that flushes but the broker
         drops the message.
         """
         bootstrap = infra["kafka_bootstrap"]
@@ -245,8 +238,7 @@ class TestAnomalyBusAndPersisterIntegration:
         assert health.failed_delivery_count == 0
 
         # Persist from Redpanda to Postgres.
-        # I'm using a unique group_id per test run so re-running the test module
-        # does not skip already-committed offsets from a previous run.
+        # Unique group_id per run so re-running the module does not skip already-committed offsets.
         group_id = f"test-persister-{int(time.time())}"
         persister = AnomalyPersister(
             bootstrap_servers=bootstrap,
@@ -282,10 +274,10 @@ class TestAnomalyBusAndPersisterIntegration:
 
     def test_fault_label_alignment(self, infra: dict) -> None:
         """
-        I'm asserting fault_label survives the full path: PipelineEvent →
-        detector → AnomalyEvent → serialization → Redpanda → deserialization →
-        AnomalyEventRow → PostgreSQL. Any step that drops or corrupts fault_label
-        would break the M14 benchmark's precision/recall computation.
+        fault_label must survive the full path: PipelineEvent → detector →
+        AnomalyEvent → serialization → Redpanda → deserialization →
+        AnomalyEventRow → PostgreSQL. Any drop corrupts the benchmark's
+        precision/recall computation.
         """
         bootstrap = infra["kafka_bootstrap"]
         db_url = infra["db_url"]

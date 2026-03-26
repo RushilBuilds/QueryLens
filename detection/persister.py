@@ -17,19 +17,15 @@ _log = structlog.get_logger(__name__)
 
 class AnomalyPersister:
     """
-    I'm implementing AnomalyPersister as a synchronous pull-and-persist loop
-    rather than an async consumer because the detection pipeline is currently
-    synchronous (CUSUMDetector and EWMADetector both run on a single thread),
-    and adding asyncio here would introduce concurrency without a throughput
-    benefit. At the expected anomaly rate (tens per minute, not thousands per
-    second), synchronous consumption is the right call.
+    Synchronous pull-and-persist loop rather than async because the detection
+    pipeline is single-threaded and asyncio would add concurrency without
+    throughput benefit at tens-per-minute anomaly rates.
 
-    I'm committing offsets only after the PostgreSQL write succeeds, using the
-    same write-then-commit ordering as IngestionWorker. A crash between write
-    and commit replays the batch on restart, producing duplicate row inserts
-    that PostgreSQL absorbs by assigning new GENERATED ALWAYS AS IDENTITY ids.
-    A commit before write would silently lose anomaly events on crash — that is
-    the failure mode we cannot tolerate.
+    Offsets are committed only after the PostgreSQL write succeeds — same
+    write-then-commit ordering as IngestionWorker. A crash between write and
+    commit replays the batch, producing duplicate inserts that PostgreSQL
+    absorbs via GENERATED ALWAYS AS IDENTITY. A commit-before-write would
+    silently lose anomaly events on crash.
     """
 
     def __init__(
@@ -57,23 +53,19 @@ class AnomalyPersister:
         max_messages: int = 1_000,
     ) -> int:
         """
-        I'm draining up to max_messages from pipeline.anomalies and writing
-        them to anomaly_events in a single transaction. The batch write is
-        cheaper than one INSERT per message and keeps the offset commit
-        horizon bounded: we commit after the full batch lands in Postgres,
-        so on crash we replay at most max_messages rather than all uncommitted
-        messages since the last group rebalance.
+        Drains up to max_messages from pipeline.anomalies and writes them in
+        a single transaction. Batch write is cheaper than one INSERT per
+        message and bounds the commit horizon — on crash, replays at most
+        max_messages rather than all uncommitted messages since the last rebalance.
 
         Returns the number of anomaly rows actually persisted.
         """
         batch: List[AnomalyEvent] = []
         offsets: List[TopicPartition] = []
 
-        # I'm using a blocking poll on the first message and non-blocking polls
-        # for the rest of the batch — same pattern as MetricConsumer.poll_batch().
-        # This prevents the persister from spinning in a tight loop when the
-        # topic is quiet while still draining a full batch quickly when events
-        # are available.
+        # Blocking poll on the first message, non-blocking for the rest — same
+        # pattern as MetricConsumer.poll_batch(). Prevents spinning on a quiet
+        # topic while still draining a full batch quickly when events arrive.
         for i in range(max_messages):
             msg: Optional[Message] = self._consumer.poll(
                 timeout=timeout_s if i == 0 else 0.0
@@ -96,9 +88,9 @@ class AnomalyPersister:
                     msg.offset() + 1,
                 ))
             except AnomalySerializationError as exc:
-                # I'm logging and skipping rather than routing to a DLQ because
-                # a malformed anomaly event is more likely a serializer bug than
-                # a data problem — alerting is more useful than a DLQ replay.
+                # Log and skip rather than route to a DLQ — a malformed anomaly
+                # is more likely a serializer bug than a data problem; alerting
+                # is more useful than a DLQ replay.
                 _log.error(
                     "anomaly_deserialization_error",
                     error=str(exc),

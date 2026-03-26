@@ -1,16 +1,12 @@
 """
 Integration test for RedpandaProducer and MetricEventSerializer.
 
-I'm using KafkaContainer with KRaft mode (no Zookeeper) as the broker because
-testcontainers does not yet ship a native RedpandaContainer. The Confluent Kafka
-image exposes an identical Kafka wire protocol, so RedpandaProducer — which uses
-the confluent_kafka client — behaves identically against it. The only difference
-at runtime is the broker implementation; the API surface the producer exercises
-is the same.
+KafkaContainer with KRaft mode is used because testcontainers has no native
+RedpandaContainer. The Confluent Kafka image exposes an identical Kafka wire
+protocol, so RedpandaProducer (confluent_kafka client) behaves identically.
 
-KRaft mode is chosen over the Zookeeper-based default because it starts in under
-10 seconds on warm Docker cache vs 20-30 seconds for the Zookeeper variant, and
-it avoids a second container that isn't relevant to what we're testing.
+KRaft over the Zookeeper default: starts in under 10 seconds on warm cache vs
+20-30 seconds, and avoids a second container irrelevant to what is being tested.
 """
 from __future__ import annotations
 
@@ -37,10 +33,9 @@ N_EVENTS = 1_000
 
 def _make_event(index: int) -> PipelineEvent:
     """
-    I'm varying stage_id across four values so events land on multiple
-    partitions (keyed by stage_id in RedpandaProducer.publish). A test that
-    only sends single-stage events would pass even if the key routing logic
-    was broken, because all messages would land on partition 0 regardless.
+    Four distinct stage_ids ensure events land on multiple partitions. A single
+    stage_id would pass even if key routing was broken — all messages would land
+    on partition 0 regardless.
     """
     stage_ids = ["source_postgres", "source_kafka", "transform_validate", "sink_warehouse"]
     return PipelineEvent(
@@ -58,11 +53,9 @@ def _make_event(index: int) -> PipelineEvent:
 @pytest.fixture(scope="module")
 def kafka_bootstrap() -> str:
     """
-    I'm scoping this fixture to the module so the container is started once
-    and shared across all tests. KRaft startup takes 8-12 seconds on a warm
-    image; per-test container lifecycle would make this suite 3-4× slower
-    without any correctness benefit since the tests don't mutate shared broker
-    state (they use distinct consumer groups and read from offset 0).
+    Module-scoped: KRaft startup takes 8-12 seconds on a warm image. Per-test
+    lifecycle would make the suite 3-4x slower with no correctness benefit —
+    tests use distinct consumer groups and read from offset 0.
     """
     with KafkaContainer(KAFKA_IMAGE).with_kraft() as kafka:
         yield kafka.get_bootstrap_server()
@@ -71,10 +64,9 @@ def kafka_bootstrap() -> str:
 @pytest.fixture(scope="module")
 def produced_health_check(kafka_bootstrap: str) -> ProducerHealthCheck:
     """
-    I'm producing all 1,000 events once at module scope so that the delivery
-    assertion tests and the consume-back tests share the same produced batch.
-    Re-producing per test would generate duplicate messages and make offset
-    count assertions non-deterministic.
+    All 1,000 events produced once at module scope so delivery assertions and
+    consume-back tests share the same batch. Per-test production would generate
+    duplicates and make offset count assertions non-deterministic.
     """
     health_check = ProducerHealthCheck()
     producer = RedpandaProducer(
@@ -96,11 +88,9 @@ def produced_health_check(kafka_bootstrap: str) -> ProducerHealthCheck:
 @pytest.fixture(scope="module")
 def consumed_messages(kafka_bootstrap: str, produced_health_check: ProducerHealthCheck) -> List[bytes]:
     """
-    I'm consuming from offset 0 on all partitions rather than joining a
-    consumer group because consumer group offset management adds non-determinism:
-    if the group already exists from a previous test run, the committed offsets
-    would skip messages. Explicit partition assignment from the beginning gives
-    a reproducible read every time.
+    Explicit partition assignment from offset 0 rather than a consumer group:
+    a pre-existing group from a prior run would have committed offsets that skip
+    messages. Direct assignment gives a reproducible read every time.
     """
     consumer = Consumer({
         "bootstrap.servers": kafka_bootstrap,
@@ -140,11 +130,10 @@ def consumed_messages(kafka_bootstrap: str, produced_health_check: ProducerHealt
 
 class TestMetricEventSerializer:
     """
-    I'm testing the serializer in isolation from the producer so that a
-    serialization regression is immediately identifiable without needing
-    a running broker. If the serializer and producer tests were merged,
-    a JSON encoding bug would surface as a mysterious delivery failure
-    rather than a clear deserialization assertion.
+    Serializer tested in isolation from the producer so a serialization
+    regression is immediately identifiable without a running broker. A merged
+    test suite would surface a JSON encoding bug as a mysterious delivery
+    failure rather than a clear deserialization assertion.
     """
 
     def test_round_trip_preserves_all_fields(self) -> None:
@@ -204,10 +193,9 @@ class TestMetricEventSerializer:
 
 class TestProducerHealthCheck:
     """
-    I'm testing the health check counters with a mock KafkaError so the test
-    doesn't need a broker. The delivery callback signature (err, msg) is
-    dictated by confluent_kafka — I'm verifying that our wrapper correctly
-    routes None vs non-None errors to the right counter.
+    Health check counters tested with a mock KafkaError — no broker needed.
+    Verifies that the wrapper correctly routes None vs non-None errors to the
+    right counter; the callback signature (err, msg) is dictated by confluent_kafka.
     """
 
     def test_successful_delivery_increments_succeeded(self) -> None:
@@ -242,9 +230,8 @@ class TestRedpandaProducerIntegration:
 
     def test_no_delivery_failures(self, produced_health_check: ProducerHealthCheck) -> None:
         """
-        I'm checking failed_delivery_count before consumed_messages so a
-        broker-level rejection is caught here rather than surfacing as a
-        confusing count mismatch in test_all_events_reach_broker.
+        Checked before consumed_messages so broker-level rejections surface here
+        rather than as a confusing count mismatch in test_all_events_reach_broker.
         """
         assert produced_health_check.failed_delivery_count == 0, (
             f"{produced_health_check.failed_delivery_count} messages failed delivery — "
@@ -259,9 +246,8 @@ class TestRedpandaProducerIntegration:
 
     def test_all_events_reach_broker(self, consumed_messages: List[bytes]) -> None:
         """
-        I'm asserting the exact count rather than >= N_EVENTS to catch
-        duplicate delivery, which would indicate the idempotent producer
-        config is not being honoured by the broker.
+        Exact count asserted rather than >= N_EVENTS to catch duplicate delivery,
+        which would indicate the idempotent producer config is not being honoured.
         """
         assert len(consumed_messages) == N_EVENTS, (
             f"Expected {N_EVENTS} messages on broker, found {len(consumed_messages)}"
@@ -269,9 +255,9 @@ class TestRedpandaProducerIntegration:
 
     def test_consumed_messages_deserialize_cleanly(self, consumed_messages: List[bytes]) -> None:
         """
-        I'm deserializing all 1,000 messages rather than sampling because
-        a partial serialization failure (e.g. a float precision edge case
-        on message 847) would be missed by a sample-based check.
+        All 1,000 messages deserialized rather than a sample: a partial failure
+        (e.g. a float precision edge case on message 847) would be missed by
+        sampling.
         """
         errors: List[str] = []
         for i, raw in enumerate(consumed_messages):
@@ -288,11 +274,9 @@ class TestRedpandaProducerIntegration:
         self, consumed_messages: List[bytes]
     ) -> None:
         """
-        I'm verifying that multiple distinct stage_ids appear in the consumed
-        batch to confirm that the key-based routing in RedpandaProducer.publish
-        is actually encoding the stage_id as the message key. If the key was
-        empty or constant, all messages would pile onto one partition and the
-        per-stage ordering guarantee would be meaningless.
+        Multiple distinct stage_ids must appear to confirm key-based routing is
+        encoding stage_id as the message key. An empty or constant key would pile
+        all messages onto one partition, making per-stage ordering meaningless.
         """
         stage_ids = {
             MetricEventSerializer.deserialize(raw).stage_id

@@ -17,11 +17,9 @@ from simulator.models import PipelineEvent
 @dataclass(frozen=True)
 class WindowConfig:
     """
-    I'm separating window configuration into its own dataclass rather than
-    passing individual parameters to SlidingWindowAggregator because all three
-    detectors (CUSUM, EWMA, and the aggregator itself) need to share the same
-    window duration and tick interval. A single config object makes it
-    impossible for them to silently diverge on these values.
+    Shared config dataclass for all three detectors (CUSUM, EWMA, aggregator).
+    A single object makes it impossible for them to silently diverge on window
+    duration or tick interval.
     """
 
     window_duration_s: float
@@ -47,27 +45,18 @@ class WindowConfig:
 
 class RingBuffer:
     """
-    I'm using a numpy array rather than a Python deque for the ring buffer
-    because `window_values()` is called on every detection tick and feeds
-    directly into np.percentile(). With a deque, every compute() call would
-    require a list-to-array conversion, which at 1,000 samples per stage
-    would add ~40μs of allocation overhead per tick — multiplied by the
-    number of stages and metrics, that compounds into meaningful tail latency
-    on the detection loop. The numpy array lets us index and mask in-place
-    with no allocation on the hot path.
+    Numpy-backed ring buffer. A deque would require a list-to-array copy on
+    every compute() call — at 1,000 samples per stage that adds ~40μs of
+    allocation overhead per tick. The numpy array allows in-place indexing
+    and masking with no allocation on the hot path.
 
-    O(1) insert: we write at `_head % capacity` and advance the pointer.
-    Old entries are overwritten implicitly when the buffer fills — no element
-    shifting, no deque rotation. Time-based eviction in `window_values()` is
-    O(n) for the mask operation, but the ring buffer structure itself is O(1)
-    to maintain per insert, which is the invariant the detection layer needs.
+    O(1) insert via `_head % capacity`; O(n) mask in `window_values()`.
     """
 
     def __init__(self, capacity: int) -> None:
         self._capacity = capacity
-        # I'm using -inf as the sentinel for empty slots so that any real
-        # timestamp comparison (>= cutoff_s) will correctly exclude them
-        # without a separate "is slot populated?" check.
+        # -inf sentinel: any real timestamp comparison (>= cutoff_s) correctly
+        # excludes empty slots without a separate population check.
         self._timestamps = np.full(capacity, -np.inf, dtype=np.float64)
         self._values = np.zeros(capacity, dtype=np.float64)
         self._head: int = 0   # next write position (mod capacity)
@@ -79,12 +68,9 @@ class RingBuffer:
 
     def push(self, timestamp_s: float, value: float) -> None:
         """
-        I'm not checking for out-of-order timestamps here. Events arriving
-        from PipelineEvent.event_time are always in ascending order within
-        a single stage's stream. Enforcing ordering would add a branch on
-        every insert for a condition that cannot occur in practice, and
-        silently dropping out-of-order events would corrupt the window in
-        tests that deliberately insert in a non-standard order.
+        No out-of-order check: events from a single stage always arrive in
+        ascending order. A validation branch on every insert would add overhead
+        for a condition that cannot occur in practice.
         """
         self._timestamps[self._head] = timestamp_s
         self._values[self._head] = value
@@ -93,14 +79,9 @@ class RingBuffer:
 
     def window_values(self, cutoff_s: float) -> np.ndarray:
         """
-        I'm computing a circular index array rather than rotating the
-        underlying storage because rotation is O(n) and would require
-        copying or np.roll(). The index array is O(n) to build but
-        shares memory with the underlying arrays through fancy indexing —
-        no second copy of the data.
-
         Returns a 1D float64 array of values whose timestamps are >= cutoff_s,
-        ordered from oldest to newest. Empty array if no values qualify.
+        ordered oldest to newest. Uses a circular index array instead of
+        np.roll() to avoid an O(n) copy of the underlying storage.
         """
         if self._count == 0:
             return np.empty(0, dtype=np.float64)
@@ -132,12 +113,10 @@ class RingBuffer:
 @dataclass(frozen=True)
 class WindowStats:
     """
-    I'm returning None for all stat fields when is_stable is False rather
-    than returning 0.0 or NaN. Returning 0.0 would look like a real measurement
-    to a downstream detector and could trigger a false alert on startup (e.g.
-    latency_p99=0.0 deviating from a baseline mean of 50ms). NaN propagates
-    silently through numpy operations. None forces the caller to explicitly
-    handle the unstable case, which is the correct behaviour.
+    All stat fields are None when is_stable is False. Returning 0.0 would look
+    like a real measurement to downstream detectors (latency_p99=0.0 would
+    trigger a false alert on startup); NaN propagates silently through numpy.
+    None forces the caller to gate on is_stable before consuming any stat.
     """
 
     stage_id: str
@@ -159,17 +138,13 @@ class WindowStats:
 
 class SlidingWindowAggregator:
     """
-    I'm maintaining one RingBuffer per (stage_id, metric_name) pair rather
-    than one buffer per stage containing a structured record. Separate buffers
-    mean that CUSUM can read latency_ms values as a clean 1D float array with
-    no column extraction step, and that a new metric can be added without
-    changing the buffer schema or invalidating any existing buffer's data.
+    Maintains one RingBuffer per (stage_id, metric_name) pair rather than one
+    structured buffer per stage. This lets CUSUM read latency_ms as a clean 1D
+    float array with no column extraction, and allows new metrics to be added
+    without invalidating existing buffers.
 
-    The three tracked metrics are latency_ms, row_count, and error_rate.
-    error_rate is derived at update time (1.0 if status != "ok", else 0.0)
-    so that compute() can use np.mean() to get the fraction without knowing
-    the raw status string — the detector layer should not depend on the
-    "ok" string literal.
+    error_rate is derived at update time (1.0 if status != "ok") so compute()
+    uses np.mean() without ever depending on the "ok" string literal.
     """
 
     _METRICS = ("latency_ms", "row_count", "error_rate")
@@ -186,11 +161,9 @@ class SlidingWindowAggregator:
 
     def update(self, event: PipelineEvent) -> None:
         """
-        I'm converting event_time to a Unix timestamp (float seconds since
-        epoch) for storage rather than keeping it as a datetime. numpy boolean
-        comparison on float arrays is ~10x faster than Python datetime
-        comparisons in a loop, and the cutoff in window_values() is computed
-        once per tick as a float — there is no need to ever convert back.
+        Stores event_time as a Unix float rather than datetime. Numpy boolean
+        comparison on float arrays is ~10x faster than datetime comparisons in
+        a loop, and the cutoff in window_values() is already a float.
         """
         ts = event.event_time.timestamp()
         stage = event.stage_id
@@ -202,16 +175,12 @@ class SlidingWindowAggregator:
 
     def compute(self, stage_id: str, now: datetime) -> WindowStats:
         """
-        I'm computing p50/p95/p99 with np.percentile (linear interpolation)
-        rather than np.quantile with a different method because linear
-        interpolation is the Prometheus-compatible definition used by histogram
-        quantile estimation. Using the same method means our pre-computed
-        percentiles can be directly compared to what Prometheus would report
-        for the same data distribution.
+        Computes p50/p95/p99 via np.percentile (linear interpolation) to match
+        the Prometheus histogram quantile definition, making pre-computed
+        percentiles directly comparable to Prometheus output.
 
-        When is_stable is False we return None for all stats. This bounds the
-        cost of returning a WindowStats object to a single allocation regardless
-        of sample count — there is no conditional numpy call on the unstable path.
+        Returns None for all stats when is_stable is False — no numpy call on
+        the unstable path, keeping the allocation cost constant.
         """
         cutoff_s = now.timestamp() - self._config.window_duration_s
 

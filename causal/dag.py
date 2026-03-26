@@ -11,13 +11,11 @@ from simulator.topology import PipelineStage, PipelineTopologyGraph
 @dataclass(frozen=True)
 class CausalAncestor:
     """
-    I'm pairing the PipelineStage with both its graph distance and cumulative
-    propagation delay because the FaultLocalizationEngine needs both signals to
-    rank root-cause candidates: distance tells us how many hops away the fault
-    originated, and cumulative_delay_ms tells us the expected time for a fault
-    at this ancestor to surface as a symptom at the query stage. A low-distance
-    ancestor with a high cumulative delay is a weaker candidate than one with
-    both low distance and low delay when the observed anomaly timing matches.
+    Pairs the PipelineStage with graph distance and cumulative propagation delay
+    because the FaultLocalizationEngine needs both: distance indicates fault origin
+    proximity; cumulative_delay_ms gives the expected time for a fault to surface
+    as a symptom. A low-distance ancestor with high delay is weaker than one with
+    both low distance and low delay when observed timing matches.
     """
 
     stage: PipelineStage
@@ -27,24 +25,19 @@ class CausalAncestor:
 
 class CausalDAG:
     """
-    I'm wrapping PipelineTopologyGraph rather than extending it because CausalDAG
-    adds do-calculus-specific behaviour (ancestor scoring by delay, d-separation
-    validation) that has no place in the structural topology layer. The two layers
-    have different reasons to change: topology changes when the pipeline is
-    reconfigured, causal semantics change when the fault propagation model evolves.
-    Wrapping keeps those change reasons separate.
+    Wraps PipelineTopologyGraph rather than extending it because CausalDAG adds
+    do-calculus-specific behaviour (ancestor scoring by delay, d-separation validation)
+    that has no place in the structural topology layer. The two layers have different
+    reasons to change: topology changes on pipeline reconfiguration; causal semantics
+    change when the fault propagation model evolves.
 
-    The underlying nx.DiGraph is accessed via the topology's internal attribute
-    rather than re-constructing it, so the two layers always share the same graph
-    structure — there is no risk of them diverging.
+    The underlying nx.DiGraph is extracted once at construction time — the graph is
+    immutable after construction, so a direct reference is safe and avoids per-query
+    topology API overhead.
     """
 
     def __init__(self, topology: PipelineTopologyGraph) -> None:
         self._topology = topology
-        # I'm extracting the networkx DiGraph from the topology once at
-        # construction time rather than going through the topology API on every
-        # query. The graph is immutable after construction (PipelineTopologyGraph
-        # exposes no mutation methods), so holding a direct reference is safe.
         self._graph: nx.DiGraph = topology._graph
 
     # ------------------------------------------------------------------
@@ -53,14 +46,12 @@ class CausalDAG:
 
     def causal_ancestors(self, stage_id: str) -> List[CausalAncestor]:
         """
-        I'm sorting ancestors by (graph_distance, cumulative_delay_ms) rather
-        than by either alone because a node two hops away with a 5ms total delay
-        is causally closer to the symptom than a node one hop away with a 200ms
-        delay. The primary key (distance) preserves the intuition that closer
-        ancestors are more likely root causes in the absence of timing information;
-        the secondary key (delay) breaks ties using propagation physics.
+        Sorts ancestors by (graph_distance, cumulative_delay_ms): a node two hops away
+        with 5ms total delay is causally closer than one hop away with 200ms delay.
+        Primary key preserves the intuition that closer ancestors are more likely root
+        causes; secondary key breaks ties using propagation physics.
 
-        Returns an empty list for source stages (no upstream stages exist).
+        Returns an empty list for source stages.
         """
         if stage_id not in self._graph:
             raise KeyError(f"Unknown stage_id '{stage_id}'")
@@ -69,10 +60,8 @@ class CausalDAG:
         if not ancestor_ids:
             return []
 
-        # Compute shortest-delay path from each ancestor to the symptomatic stage.
-        # I'm using Dijkstra with propagation_delay_ms as the weight so that the
-        # path with the smallest total propagation delay is selected — this is the
-        # path along which a fault would first manifest as a symptom.
+        # Dijkstra with propagation_delay_ms weight selects the minimum-delay path —
+        # the path along which a fault would first manifest as a symptom.
         try:
             delays = nx.single_target_shortest_path_length(
                 self._graph, stage_id
@@ -95,11 +84,9 @@ class CausalDAG:
 
     def _cumulative_delay(self, from_id: str, to_id: str) -> float:
         """
-        I'm computing cumulative delay along the minimum-total-delay path rather
-        than the minimum-hop path. In a pipeline where one branch has 5ms edges
-        and another has 200ms edges, a two-hop path via the fast branch shows up
-        before a one-hop path via the slow branch — fault propagation follows
-        physics, not hop count.
+        Cumulative delay along the minimum-total-delay path rather than the minimum-hop
+        path: a two-hop path via a fast branch appears before a one-hop path via a slow
+        branch — fault propagation follows physics, not hop count.
 
         Returns 0.0 if from_id and to_id are the same node.
         """
@@ -140,20 +127,16 @@ class CausalDAG:
 
 class AncestorResolver:
     """
-    I'm factoring ancestor resolution into its own class rather than keeping
-    it as a method on CausalDAG because the resolver accumulates query-time
-    state (caching resolved ancestors per stage) that does not belong on the
-    DAG itself. The DAG is a structural object — it should not hold query
-    results. The resolver is a stateful service that the FaultLocalizationEngine
-    can hold as a dependency-injected collaborator.
+    Separate from CausalDAG because the resolver accumulates query-time state
+    (per-stage cache) that does not belong on a structural object. The DAG should not
+    hold query results; the resolver is a stateful service injected as a collaborator.
+
+    Per-stage caching avoids repeated Dijkstra runs: a burst of 100 anomalies for
+    the same stage would otherwise repeat the same computation 100 times.
     """
 
     def __init__(self, dag: CausalDAG) -> None:
         self._dag = dag
-        # I'm caching per-stage results because the DAG is immutable and
-        # ancestor queries repeat for every anomaly event that arrives for
-        # the same stage. Without caching, a burst of 100 anomalies for
-        # 'sink_etl' would repeat the same Dijkstra computation 100 times.
         self._cache: Dict[str, List[CausalAncestor]] = {}
 
     def resolve(self, symptomatic_stage_id: str) -> List[CausalAncestor]:
@@ -187,26 +170,17 @@ class AncestorResolver:
 
 class CausalDAGValidator:
     """
-    I'm implementing d-separation validation as a structural check on the
-    pipeline DAG rather than as a probabilistic test because the pipeline
-    topology is fully observed — every stage emits PipelineEvents, so there
-    are no latent confounders. In a fully observed DAG, the adjustment formula
-    is always valid and d-separation holds trivially for any query. The
-    structural checks here catch misconfigurations (wrong stage_type labels,
-    disconnected subgraphs, negative delays) that would make causal queries
-    return silently wrong answers without raising.
+    Structural checks rather than probabilistic d-separation tests because the pipeline
+    is fully observed — every stage emits PipelineEvents, so there are no latent
+    confounders. The checks catch misconfigurations that would make causal queries
+    return silently wrong answers:
 
-    Each check targets a specific failure mode:
-    - Type consistency: a 'source' stage with in-edges would have its anomaly
-      incorrectly attributed to upstream stages that do not exist in the model.
-    - Non-negative delays: negative delays are physically impossible and would
-      reverse the causal ordering in the FaultLocalizationEngine's Bayesian update.
-    - Reachability: isolated subgraphs represent pipeline segments whose faults
-      can never propagate to observed sinks — they are unobservable confounders
-      and would invalidate the do-calculus adjustment.
-    - Acyclicity: already guaranteed by PipelineTopologyGraph; re-checked here
-      as a defence in depth since CausalDAG could theoretically be constructed
-      from a non-PipelineTopologyGraph in future.
+    - Type consistency: a 'source' stage with in-edges would have its anomaly incorrectly
+      attributed to upstream stages that do not exist in the model.
+    - Non-negative delays: negative delays reverse causal ordering in the Bayesian update.
+    - Reachability: isolated subgraphs have faults that cannot propagate to observed sinks,
+      making them unobservable confounders that invalidate the do-calculus adjustment.
+    - Acyclicity: guaranteed by PipelineTopologyGraph but re-checked as defence in depth.
     """
 
     def __init__(self, dag: CausalDAG) -> None:
@@ -214,11 +188,9 @@ class CausalDAGValidator:
 
     def validate(self) -> None:
         """
-        Runs all structural checks in sequence. Raises ValueError on the first
-        violation found. I'm raising on the first violation rather than collecting
-        all violations because a misconfigured topology is not safe to use at all
-        — partial validation success does not mean the causal queries will be
-        correct.
+        Runs all structural checks in sequence, raising ValueError on the first violation.
+        A misconfigured topology is not safe to use at all — partial validation success
+        does not mean causal queries will be correct.
         """
         self._check_acyclicity()
         self._check_stage_type_consistency()
@@ -235,11 +207,9 @@ class CausalDAGValidator:
 
     def _check_stage_type_consistency(self) -> None:
         """
-        I'm checking that stage_type labels match the graph structure because
-        the FaultLocalizationEngine uses stage_type to assign priors: source
-        stages get a higher prior for originating faults, sinks get a lower
-        prior. A miscategorised stage (e.g., a transform labelled as 'source')
-        would silently skew the Bayesian ranking toward the wrong candidates.
+        Verifies stage_type labels match graph structure. The FaultLocalizationEngine
+        uses stage_type to assign priors; a miscategorised stage would silently skew
+        the Bayesian ranking toward the wrong candidates.
         """
         graph = self._dag._graph
         topology = self._dag.topology
@@ -276,10 +246,9 @@ class CausalDAGValidator:
 
     def _check_reachability(self) -> None:
         """
-        I'm requiring that every stage either is a source or has a path from at
-        least one source, and either is a sink or has a path to at least one sink.
-        A stage that fails either check is in an isolated subgraph — its anomalies
-        cannot be causally connected to the rest of the pipeline model.
+        Every stage must either be a source or have a path from at least one source.
+        A stage that fails this check is in an isolated subgraph whose anomalies cannot
+        be causally connected to the rest of the pipeline model.
         """
         graph = self._dag._graph
         topology = self._dag.topology

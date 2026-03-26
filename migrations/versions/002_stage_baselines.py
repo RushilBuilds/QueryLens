@@ -4,11 +4,10 @@ Revision ID: 002
 Revises: 001
 Create Date: 2026-03-22 00:00:00.000000
 
-I'm adding this table in a separate migration rather than the initial schema
-because the columns depend on the SeasonalBaselineModel contract finalized in
-Milestone 10. Putting it in 001 would have required changing the column names
-once the detection API was designed, producing a corrective migration that
-makes the history harder to follow.
+Separate migration rather than the initial schema because the columns depend
+on the SeasonalBaselineModel contract finalized in Milestone 10. Including
+them in 001 would have required renaming columns once the detection API was
+designed, producing a corrective migration that obscures the history.
 """
 from __future__ import annotations
 
@@ -24,11 +23,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # I'm using SMALLINT for hour_of_week (0-167) rather than INTEGER to make
-    # the domain constraint self-documenting at the type level. A SMALLINT
-    # value outside 0-167 would indicate a computation bug in the fitter, and
-    # the narrower type makes it obvious in any schema browser that this column
-    # is a bounded enumeration, not a general-purpose integer.
+    # SMALLINT for hour_of_week (0-167) rather than INTEGER makes the domain
+    # constraint self-documenting. A value outside 0-167 indicates a fitter
+    # bug, and the narrower type signals to schema browsers that this is a
+    # bounded enumeration, not a general-purpose integer.
     op.execute("""
         CREATE TABLE stage_baselines (
             id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -47,13 +45,10 @@ def upgrade() -> None:
         )
     """)
 
-    # I'm creating a compound index on (stage_id, metric) because the most
-    # common access pattern is "give me all hour-of-week baselines for this
-    # stage and metric" — the CUSUM/EWMA detectors load an entire stage's
-    # baseline vector at startup, not individual slots. The UNIQUE constraint
-    # on (stage_id, hour_of_week, metric) already creates an index, but its
-    # leftmost key is stage_id — this index makes metric the second filter
-    # without a full scan of all 168 hour slots first.
+    # Compound index on (stage_id, metric) for the most common access pattern:
+    # loading all 168 hour-of-week baselines for a given stage and metric.
+    # The UNIQUE constraint index has stage_id as its leftmost key already;
+    # this index makes metric the second filter without scanning all 168 slots.
     op.execute("""
         CREATE INDEX idx_stage_baselines_stage_metric
             ON stage_baselines (stage_id, metric)

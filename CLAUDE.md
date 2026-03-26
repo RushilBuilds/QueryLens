@@ -2,7 +2,7 @@
 
 ## Identity & Voice
 
-- All code comments must be written in first-person engineering voice as if a senior data engineer wrote them (e.g. "I'm using CUSUM here because it handles non-stationary drift better than a simple z-score")
+- All code comments must be written in concise third-person engineering voice (e.g. "CUSUM handles non-stationary drift better than a simple z-score — preferred here for that reason")
 - Never write generic comments like `# initialize the logger` or `# define the function`
 - Every function must have a docstring explaining the trade-off made, not just what it does
 

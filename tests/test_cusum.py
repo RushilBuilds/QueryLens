@@ -32,10 +32,9 @@ SIM_START = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # Monday 00:00 �
 
 def _flat_baseline(mean: float, std: float, stage_id: str = "src") -> SeasonalBaselineModel:
     """
-    I'm using the same (mean, std) for all 168 hour_of_week slots so tests
-    can insert events at any timestamp without worrying about which seasonal
-    slot they land in. A real baseline has different values per slot; we
-    test that integration in test_baseline.py.
+    Same (mean, std) for all 168 hour_of_week slots so tests can insert events
+    at any timestamp without worrying about seasonal slot boundaries.
+    Slot-varying behaviour is tested in test_baseline.py.
     """
     entries = {
         BaselineKey(stage_id, how, metric): BaselineEntry(
@@ -139,10 +138,9 @@ class TestCUSUMDetectorBaseline:
 
     def test_no_anomaly_during_on_target_events(self) -> None:
         """
-        I'm feeding 100 events exactly at the baseline mean (z=0) and asserting
-        no anomaly fires. With k>0, every update produces max(0, 0-k)=0 so the
-        accumulators stay at zero permanently. Any fire here would mean the
-        accumulator update formula is wrong.
+        100 events at the baseline mean (z=0). With k>0, every update produces
+        max(0, 0-k)=0 so accumulators stay at zero permanently. Any fire here
+        means the accumulator update formula is wrong.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = CUSUMDetector(
@@ -167,10 +165,9 @@ class TestCUSUMDetectorBaseline:
 
     def test_accumulator_increments_correctly_for_positive_shift(self) -> None:
         """
-        I'm verifying the accumulator value after one event rather than waiting
-        for a fire so that an off-by-one in the formula (e.g. S = S + z instead
-        of S = max(0, S + z - k)) fails here, not buried inside a detection lag
-        assertion where the failure mode is harder to diagnose.
+        Asserts the accumulator after one event so a formula off-by-one (e.g.
+        S = S + z instead of S = max(0, S + z - k)) fails here, not buried in
+        a detection lag assertion.
 
         With z=1.0 and k=0.5: S_upper after 1 step = max(0, 0 + 1.0 - 0.5) = 0.5
         """
@@ -185,10 +182,9 @@ class TestCUSUMDetectorBaseline:
 
     def test_accumulator_floored_at_zero_for_below_baseline_events(self) -> None:
         """
-        I'm confirming the max(0, ...) floor prevents the accumulator from going
-        negative. A negative accumulator would give the detector a 'head start'
-        against the next upward shift — effectively reducing h without changing
-        the config.
+        The max(0, ...) floor prevents the accumulator from going negative. A
+        negative accumulator gives the detector a head start on the next upward
+        shift — effectively reducing h without changing the config.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = CUSUMDetector(
@@ -209,9 +205,8 @@ class TestCUSUMStepChange:
 
     def test_detects_large_upward_step(self) -> None:
         """
-        I'm using latency=90ms (z=4.0) with k=0.5, h=4.0. After one event
-        S_upper = max(0, 4.0 - 0.5) = 3.5. After two events = 7.0 > h → fires.
-        The detector must emit an AnomalyEvent with signal='upper'.
+        latency=90ms (z=4.0), k=0.5, h=4.0. After one event S_upper=3.5;
+        after two events S_upper=7.0 > h → fires. Must emit signal='upper'.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = CUSUMDetector(
@@ -230,11 +225,9 @@ class TestCUSUMStepChange:
 
     def test_detects_large_downward_step(self) -> None:
         """
-        I'm testing the lower accumulator with latency=10ms (z=-4.0) to verify
-        that the symmetric CUSUM catches downward drift. A detector that only
-        watches for upward shifts would miss a source stage that starts dropping
-        records (row_count collapses) or a sink that completes too quickly
-        (possible data loss, not just slowness).
+        Lower accumulator with latency=10ms (z=-4.0). Symmetric CUSUM must
+        catch downward drift — a detector watching only upward shifts would
+        miss a source dropping records or a sink completing suspiciously fast.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = CUSUMDetector(
@@ -251,10 +244,9 @@ class TestCUSUMStepChange:
 
     def test_accumulator_resets_to_zero_after_fire(self) -> None:
         """
-        I'm verifying the reset happens by checking that the accumulator does
-        NOT keep growing after the first fire. If the reset were missing, the
-        detector would fire on every subsequent event once the threshold is
-        exceeded, flooding the AnomalyEventBus.
+        Verifies reset by checking the accumulator does not keep growing after
+        the first fire. Without a reset, the detector would fire on every
+        subsequent event once the threshold is exceeded.
         """
         baseline = _flat_baseline(mean=50.0, std=10.0)
         detector = CUSUMDetector(
@@ -306,10 +298,9 @@ class TestCUSUMRampChange:
 
     def test_z_score_alarm_does_not_fire_on_ramp(self) -> None:
         """
-        I'm asserting this explicitly because if it fired, the entire point of
-        using CUSUM would be moot — a simple threshold would suffice. A failure
-        here means the ramp latencies are too large and the test setup needs
-        to use smaller steps.
+        If a simple z-score alarm fires here, CUSUM is redundant and a simpler
+        threshold would suffice. Failure means the ramp latencies are too large
+        and the test setup needs smaller steps.
         """
         for event in self._ramp_events():
             z = abs((event.latency_ms - self.BASELINE_MEAN) / self.BASELINE_STD)
@@ -321,11 +312,10 @@ class TestCUSUMRampChange:
 
     def test_cusum_detects_ramp_that_z_score_misses(self) -> None:
         """
-        I'm asserting at least one AnomalyEvent fires across the full ramp
-        sequence. The exact event index where it fires depends on the
-        accumulator arithmetic — asserting 'at least one' is the right contract
-        because CUSUM fires when sufficient evidence accumulates, not at a fixed
-        lag.
+        At least one AnomalyEvent must fire across the ramp. The exact event
+        index depends on accumulator arithmetic — 'at least one' is the right
+        contract because CUSUM fires when sufficient evidence accumulates, not
+        at a fixed lag.
         """
         baseline = _flat_baseline(self.BASELINE_MEAN, self.BASELINE_STD)
         detector = CUSUMDetector(
@@ -348,10 +338,9 @@ class TestCUSUMRampChange:
 
     def test_cusum_fires_before_ramp_ends(self) -> None:
         """
-        I'm verifying detection happens before the last event so CUSUM is
-        actually accumulating rather than just catching the final event's
-        z-score alone (which would be indistinguishable from a z-score alarm).
-        The ramp has 10 events; CUSUM must fire no later than event 9 (index 8).
+        Detection must happen before the last event so CUSUM is actually
+        accumulating, not just catching the final z-score (indistinguishable
+        from a simple alarm). The ramp has 10 events; must fire by index 8.
         """
         baseline = _flat_baseline(self.BASELINE_MEAN, self.BASELINE_STD)
         detector = CUSUMDetector(
@@ -384,9 +373,8 @@ class TestCUSUMMultiStage:
 
     def test_stage_accumulators_are_independent(self) -> None:
         """
-        I'm feeding fault events to stage_a only and verifying stage_b's
-        accumulator stays at zero. A shared accumulator dict with a stage_id
-        bug (e.g. wrong key lookup) would contaminate stage_b.
+        Fault events sent to stage_a only — stage_b's accumulator must stay at
+        zero. A shared dict with a stage_id key bug would contaminate stage_b.
         """
         baseline_a = _flat_baseline(50.0, 10.0, stage_id="stage_a")
         # Build combined baseline for both stages
@@ -432,9 +420,8 @@ class TestCUSUMMultiStage:
 
     def test_missing_baseline_skips_update_silently(self) -> None:
         """
-        I'm verifying that an event for a stage with no baseline entry does not
-        raise and does not leave a non-zero accumulator. The update must be a
-        no-op, not a crash.
+        An event for a stage with no baseline entry must not raise and must not
+        leave a non-zero accumulator — a no-op, not a crash.
         """
         empty_baseline = SeasonalBaselineModel({})
         detector = CUSUMDetector(

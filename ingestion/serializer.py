@@ -6,12 +6,9 @@ from typing import Any, Dict
 
 from simulator.models import PipelineEvent
 
-# I'm pinning the current wire format to schema_version=1 so the consumer can
-# detect and handle format changes without coordinating a simultaneous deploy.
-# The alternative — versioning via Kafka topic name (pipeline.metrics.v2) —
-# forces a new consumer group and replay of all historical data every time the
-# schema evolves. Field-level versioning lets the consumer decide whether it
-# can handle an older or newer version without topic proliferation.
+# schema_version=1 pins the wire format so the consumer detects changes without
+# a simultaneous deploy. Topic-name versioning (pipeline.metrics.v2) would force
+# a new consumer group and full historical replay on every schema change.
 CURRENT_SCHEMA_VERSION: int = 1
 
 
@@ -21,30 +18,23 @@ class SerializationError(Exception):
 
 class MetricEventSerializer:
     """
-    I'm using JSON rather than Avro or MessagePack for the wire format because
-    we have no schema registry in the current infrastructure and the event
-    throughput (single-digit thousands per second) is well within JSON's
-    performance envelope. Avro would buy binary compactness and schema
-    enforcement at the cost of a registry dependency; MessagePack buys ~30%
-    size reduction at the cost of non-human-readable DLQ messages. Both
-    trade-offs are wrong at this scale — DLQ debuggability matters more than
-    throughput headroom we don't need yet.
+    JSON over Avro or MessagePack: no schema registry exists in the current
+    infrastructure and throughput (single-digit thousands/sec) is well within
+    JSON's envelope. Avro buys compactness at the cost of a registry dependency;
+    MessagePack buys ~30% size reduction at the cost of non-human-readable DLQ
+    messages. DLQ debuggability matters more than headroom we don't need yet.
 
-    datetime fields are serialized as ISO 8601 strings with UTC offset rather
-    than Unix timestamps. Unix timestamps are unambiguous but require the reader
-    to know the expected precision (seconds vs milliseconds vs microseconds),
-    which has caused data loss bugs in the past when the precision assumption
-    drifted between producer and consumer versions.
+    datetime fields serialized as ISO 8601 with UTC offset rather than Unix
+    timestamps: Unix precision (seconds vs ms vs us) is an implicit assumption
+    that has caused data loss when it drifted between producer and consumer.
     """
 
     @staticmethod
     def serialize(event: PipelineEvent) -> bytes:
         """
-        I'm encoding event_time with explicit UTC offset (+00:00) rather than
-        relying on the Z suffix because Python's datetime.fromisoformat() did
-        not support the Z suffix until 3.11, and we may run this consumer on
-        3.10 in some environments. The +00:00 form is unambiguous across all
-        Python versions that support timezone-aware datetimes.
+        event_time encoded with explicit UTC offset (+00:00) rather than Z:
+        datetime.fromisoformat() did not support the Z suffix until Python 3.11,
+        and the consumer may run on 3.10.
         """
         payload: Dict[str, Any] = {
             "schema_version": CURRENT_SCHEMA_VERSION,
@@ -62,11 +52,9 @@ class MetricEventSerializer:
     @staticmethod
     def deserialize(data: bytes) -> PipelineEvent:
         """
-        I'm validating schema_version before attempting field extraction so
-        that a version mismatch produces a clear SerializationError with the
-        actual version number rather than a KeyError on a field that no longer
-        exists. The consumer's dead-letter handler depends on a structured
-        exception to write useful context to the DLQ message.
+        schema_version validated before field extraction so a mismatch raises a
+        clear SerializationError rather than a KeyError on a missing field. The
+        DLQ handler depends on a structured exception to write useful context.
         """
         try:
             payload = json.loads(data.decode("utf-8"))

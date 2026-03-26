@@ -1,16 +1,13 @@
 """
 Integration test for M8: Prometheus /metrics endpoint and structlog instrumentation.
 
-I'm testing the observability layer against real containers rather than mocking
-prometheus_client because the metric we care about is what Prometheus actually
-scrapes — not what the Python counter object holds in memory. A mock would
-verify that inc() was called but not that the value shows up on /metrics, which
-is the contract that matters for alerting.
+Tested against real containers rather than mocking prometheus_client — the contract
+that matters for alerting is what Prometheus actually scrapes, not what the Python
+counter object holds in memory.
 
-I'm asserting counter deltas (after - before) rather than absolute values so the
-test is safe to run after other tests in the same session have already incremented
-the module-level counters. Absolute assertions would fail on the second pytest run
-in the same process.
+Counter deltas (after - before) are asserted rather than absolute values so the
+test remains safe when module-level counters have been incremented by earlier tests
+in the same session.
 """
 from __future__ import annotations
 
@@ -76,14 +73,10 @@ def _produce_events(bootstrap: str, topic: str, events: List[PipelineEvent]) -> 
 
 def _scrape_metrics(port: int) -> Dict[str, float]:
     """
-    I'm parsing the Prometheus text exposition format manually rather than
-    importing prometheus_client.parser because the parser would read from the
-    same in-process registry — bypassing the HTTP round-trip we're trying to
-    verify. The text format is simple enough that a line-by-line parse is
-    reliable: skip comments, split on the last space, cast the value.
-
-    I'm only extracting the ingestion_* metrics we own to avoid false matches
-    on lines from other collectors (go_*, process_*, python_*).
+    Parses the Prometheus text format manually rather than using
+    prometheus_client.parser, which would read the in-process registry and
+    bypass the HTTP round-trip being verified. Only ingestion_* lines are
+    extracted to avoid false matches from go_*, process_*, python_* collectors.
     """
     url = f"http://127.0.0.1:{port}/metrics"
     with urllib.request.urlopen(url, timeout=5) as resp:
@@ -111,10 +104,10 @@ def _scrape_metrics(port: int) -> Dict[str, float]:
 @pytest.fixture(scope="module")
 def infra():
     """
-    I'm scoping the containers to the module so both test classes share the
-    same broker and database. The containers are the slowest part of the
-    setup — starting them twice would double the wall time for no benefit
-    since the tests use distinct topic names and isolated consumer groups.
+    Module-scoped so both test classes share the same broker and database.
+    Container startup is the dominant cost — separate fixtures would double
+    wall time with no correctness benefit since tests use distinct topic names
+    and isolated consumer groups.
     """
     with KafkaContainer(KAFKA_IMAGE).with_kraft() as kafka, \
          PostgresContainer(POSTGRES_IMAGE) as pg:
@@ -139,9 +132,8 @@ class TestMetricsServer:
 
     def test_server_starts_and_responds_on_assigned_port(self) -> None:
         """
-        I'm testing with port=0 (OS-assigned) to verify the port property
-        correctly reflects the actual listening port. A hardcoded port would
-        make the test fragile in CI where another process might hold it.
+        port=0 (OS-assigned) verifies the port property reflects the actual
+        listening port. A hardcoded port would be fragile in CI.
         """
         server = MetricsServer(port=0)
         server.start()
@@ -157,11 +149,9 @@ class TestMetricsServer:
 
     def test_server_exposes_ingestion_metrics(self) -> None:
         """
-        I'm asserting that the ingestion metric names we defined appear in the
-        /metrics output before any increments. prometheus_client registers metrics
-        at import time and includes them in every scrape — the counter will show
-        value 0 but must be present so Prometheus can build a consistent time
-        series from the first scrape.
+        prometheus_client registers metrics at import time, so metric names must
+        appear in /metrics before any increments. A consistent time series from
+        the first scrape requires the counter to be present at value 0.
         """
         server = MetricsServer(port=0)
         server.start()
@@ -184,10 +174,8 @@ class TestMetricsServer:
 
 class TestPrometheusCounterIncrements:
     """
-    I'm running the full ingestion stack and asserting counter deltas rather
-    than absolute values because the module-level Prometheus singletons
-    accumulate across the entire test session. Testing deltas makes this test
-    independent of run order.
+    Counter deltas are asserted rather than absolute values because module-level
+    Prometheus singletons accumulate across the test session.
     """
 
     def test_records_written_and_consumed_increment_by_stage(self, infra: dict) -> None:
@@ -264,11 +252,8 @@ class TestPrometheusCounterIncrements:
 
     def test_write_latency_histogram_observed(self, infra: dict) -> None:
         """
-        I'm asserting that ingestion_write_latency_seconds_count incremented by
-        exactly 1 after one flush cycle. A batch_size equal to N_TOTAL means
-        there is exactly one flush, so _count must go up by 1. If the histogram
-        observe() call were missing, _count would stay at 0 and this assertion
-        would catch it.
+        batch_size == N_TOTAL means exactly one flush, so _count must increment
+        by 1. A missing histogram.observe() call would leave _count at 0.
         """
         # The previous test already flushed one batch — we just check the
         # histogram count increased from the start of that test. Re-scraping
@@ -287,9 +272,9 @@ class TestPrometheusCounterIncrements:
 
     def test_dlq_counter_increments_for_malformed_messages(self, infra: dict) -> None:
         """
-        I'm testing the DLQ counter independently from the main counter test
-        to keep assertion scope narrow. One malformed message in an otherwise
-        valid batch must increment ingestion_dlq_events_total by exactly 1.
+        Tested independently from the main counter test to keep assertion scope
+        narrow. One malformed message must increment ingestion_dlq_events_total
+        by exactly 1.
         """
         bootstrap = infra["kafka_bootstrap"]
         db_url = infra["db_url"]

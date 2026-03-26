@@ -115,11 +115,7 @@ class TestCausalDAGStructure:
         assert not dag.has_edge("sink_e", "source_a")
 
     def test_edge_delay_direct(self, dag: CausalDAG) -> None:
-        """
-        I'm testing edge_delay_ms directly to confirm the edge attribute was
-        set correctly during graph construction. A wrong delay here would corrupt
-        all cumulative_delay calculations in ancestor resolution.
-        """
+        """Tests edge_delay_ms directly — a wrong delay here corrupts all cumulative_delay calculations."""
         # transform_b's propagation_delay_ms=10 is on the source_a→transform_b edge.
         assert dag.edge_delay_ms("source_a", "transform_b") == pytest.approx(10.0)
         assert dag.edge_delay_ms("source_a", "transform_c") == pytest.approx(15.0)
@@ -144,10 +140,9 @@ class TestCausalAncestors:
 
     def test_source_stage_has_no_ancestors(self, dag: CausalDAG) -> None:
         """
-        I'm asserting that source stages return an empty ancestor list rather
-        than raising — the FaultLocalizationEngine calls resolve() on every
-        stage that shows an anomaly, including source stages, and must handle
-        the empty-ancestor case without special-casing the call site.
+        Source stages must return an empty ancestor list rather than raising — the
+        FaultLocalizationEngine calls resolve() on every anomalous stage including
+        sources and must handle the empty case without special-casing the call site.
         """
         assert dag.causal_ancestors("source_a") == []
         assert dag.causal_ancestors("source_d") == []
@@ -159,10 +154,9 @@ class TestCausalAncestors:
 
     def test_ancestors_sorted_by_distance_first(self, dag: CausalDAG) -> None:
         """
-        I'm verifying the primary sort key is graph_distance so that the closest
-        ancestors (transforms at distance=1) appear before the more-distant sources.
-        The FaultLocalizationEngine starts from the closest ancestor and walks
-        outward — correct ordering is essential for its greedy search strategy.
+        Primary sort key must be graph_distance so closest ancestors appear first.
+        The FaultLocalizationEngine walks outward from the closest ancestor —
+        correct ordering is essential for its greedy search strategy.
         """
         ancestors = dag.causal_ancestors("sink_e")
         distances = [a.graph_distance for a in ancestors]
@@ -177,12 +171,7 @@ class TestCausalAncestors:
         assert ancestors[3].graph_distance == 2
 
     def test_distance1_ancestors_sorted_by_delay(self, dag: CausalDAG) -> None:
-        """
-        I'm asserting that among ancestors at the same graph_distance, the one
-        with smaller cumulative_delay_ms comes first. transform_b is 5ms from
-        sink_e; transform_c is 5ms from sink_e — they're equal here. Let me
-        check both have 5ms and either order is acceptable.
-        """
+        """Among same-distance ancestors, smaller cumulative_delay_ms must come first."""
         ancestors = dag.causal_ancestors("sink_e")
         dist1 = [a for a in ancestors if a.graph_distance == 1]
         assert all(a.cumulative_delay_ms == pytest.approx(5.0) for a in dist1)
@@ -238,9 +227,8 @@ class TestAncestorResolver:
 
     def test_resolve_caches_result(self, dag: CausalDAG) -> None:
         """
-        I'm verifying caching by calling resolve() twice and asserting the
-        returned lists are the same object (identity check). If the resolver
-        re-computed on the second call, it would return a new list object.
+        Verifies caching via object identity: if the resolver recomputed on the
+        second call it would return a new list object, not the same one.
         """
         resolver = AncestorResolver(dag)
         first = resolver.resolve("sink_e")
@@ -276,7 +264,6 @@ class TestCausalDAGValidatorHappyPath:
 
     def test_valid_topology_passes_without_raising(self, dag: CausalDAG) -> None:
         """
-        I'm asserting no exception is raised on the well-formed 5-stage topology.
         Any regression in the validator logic that throws on a correct graph
         would fail the FaultLocalizationEngine at startup.
         """
@@ -296,10 +283,9 @@ class TestCausalDAGValidatorRejections:
 
     def test_rejects_source_with_upstream_edges(self) -> None:
         """
-        I'm testing that a stage labelled 'source' but with upstream edges fails
-        validation. The FaultLocalizationEngine would never attribute a fault to
-        the phantom upstream of a miscategorised source, producing silently wrong
-        root-cause rankings.
+        A stage labelled 'source' with upstream edges fails validation — the
+        FaultLocalizationEngine would attribute faults to phantom upstreams,
+        producing silently wrong root-cause rankings.
         """
         stages = [
             PipelineStage("real_source", "source", [], 0.0),
@@ -357,12 +343,10 @@ class TestCausalDAGValidatorRejections:
 
     def test_rejects_isolated_transform_stage(self) -> None:
         """
-        I'm testing that a transform stage with no edges fails validation. In a
-        directed DAG without cycles, a node with in_degree=0 and out_degree=0
-        typed as 'transform' is an isolated confounder — its faults cannot be
-        causally connected to any other stage. The type-consistency check catches
-        this before the reachability check, which is correct: both checks protect
-        the same invariant via different failure-mode paths.
+        A transform stage with no edges is an isolated confounder — its faults cannot
+        be causally connected to any other stage. The type-consistency check catches
+        this before the reachability check, protecting the same invariant via different
+        failure-mode paths.
         """
         stages = [
             PipelineStage("src", "source", [], 0.0),

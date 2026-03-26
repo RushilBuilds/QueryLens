@@ -11,23 +11,18 @@ from simulator.models import PipelineEvent
 @dataclass(frozen=True)
 class CUSUMConfig:
     """
-    I'm exposing both decision_threshold (h) and slack_parameter (k) as
-    first-class fields rather than deriving one from the other because the
-    optimal values depend on the false-positive budget, not on each other.
+    Both decision_threshold (h) and slack_parameter (k) are first-class fields
+    because their optimal values depend on the false-positive budget, not on
+    each other.
 
-    The trade-off:
-    - Increasing h reduces false-positive rate but increases detection lag
-      (more observations needed before S_upper or S_lower exceeds h).
-    - Increasing k makes the detector ignore small deviations (slack), which
-      reduces false positives from minor seasonal noise but increases the lag
-      for detecting a shift of exactly k standard deviations.
+    Trade-offs:
+    - Increasing h reduces FPR but increases detection lag.
+    - Increasing k ignores small deviations, reducing seasonal noise FPs but
+      increasing lag for shifts of exactly k standard deviations.
 
     Typical starting values for z-score input:
     - k = 0.5 σ  (target shift to detect: 1σ above baseline)
-    - h = 4.0    (in control ARL ≈ 500 for standard normal input)
-
-    A lower h (e.g. h = 2.0) makes the detector more sensitive but at the
-    cost of roughly one false alarm per 100 observations in a healthy pipeline.
+    - h = 4.0    (in-control ARL ≈ 500 for standard normal input)
     """
 
     decision_threshold: float    # h — S must exceed this to fire
@@ -47,24 +42,19 @@ class CUSUMConfig:
 
 class CUSUMDetector:
     """
-    I'm implementing the tabular (one-sided) CUSUM applied in both directions
-    (upper and lower) rather than the FIR (fast initial response) variant.
-    FIR starts accumulators at h/2 to speed up detection after a reset, but
-    it also increases false-positive rate immediately after every reset —
-    including the frequent legitimate resets that happen when a fault clears.
-    Tabular CUSUM starting from 0 after each reset is slower to re-arm but
-    has a stable false-positive rate throughout its operating window.
+    Tabular (one-sided) CUSUM applied in both directions rather than the FIR
+    (fast initial response) variant. FIR starts accumulators at h/2 to speed
+    up detection after a reset, but raises FPR immediately after every reset —
+    including legitimate resets when a fault clears. Tabular CUSUM from 0 is
+    slower to re-arm but has a stable FPR throughout its operating window.
 
-    The update formula for z-score input (μ = 0 under baseline):
+    Update formula for z-score input (μ = 0 under baseline):
         S_upper[t] = max(0, S_upper[t-1] + z[t] - k)
         S_lower[t] = max(0, S_lower[t-1] - z[t] - k)
 
-    Fire when S_upper > h or S_lower > h. Reset the fired accumulator to 0.
-
-    I'm resetting only the accumulator that fired rather than both. If a
-    latency spike causes S_upper to fire, S_lower may have been accumulating
-    negative drift simultaneously — resetting it too would discard information
-    about a concurrent downward shift in a different metric.
+    Fire when S_upper > h or S_lower > h. Reset only the fired accumulator —
+    if a spike causes S_upper to fire, S_lower may have been accumulating
+    negative drift simultaneously and resetting it discards that signal.
     """
 
     def __init__(
@@ -80,11 +70,9 @@ class CUSUMDetector:
 
     def update(self, event: PipelineEvent) -> List[AnomalyEvent]:
         """
-        I'm processing all configured metrics in a single update() call rather
-        than requiring the caller to call update() once per metric. The caller
-        (the detection loop) sees one event at a time; splitting the per-metric
-        logic out would force it to loop over metrics externally and keep track
-        of which detector instance owns which metric, complicating the loop.
+        Processes all configured metrics in a single call rather than requiring
+        one call per metric. The caller sees one event at a time; per-metric
+        splitting would force external metric loops and complicate ownership.
 
         Returns a list of AnomalyEvents (typically empty). A single event can
         fire at most one AnomalyEvent per metric (upper or lower, not both),
@@ -102,11 +90,9 @@ class CUSUMDetector:
                 metric=metric,
                 value=value,
             )
-            # I'm skipping the accumulator update entirely when the baseline
-            # has no entry for this (stage, hour_of_week, metric) slot rather
-            # than treating z=None as z=0. Accumulating z=0 would be harmless
-            # numerically but would make it impossible to distinguish "no drift"
-            # from "no baseline" when debugging accumulator traces.
+            # Skip when no baseline rather than treating z=None as z=0.
+            # Accumulating z=0 is harmless numerically but makes it impossible
+            # to distinguish "no drift" from "no baseline" in accumulator traces.
             if z is None:
                 continue
 
@@ -157,12 +143,10 @@ class CUSUMDetector:
 
     def reset(self, stage_id: str, metric: str) -> None:
         """
-        I'm exposing an explicit reset so the healing layer can clear a
-        detector's state after a confirmed fault is remediated. Without a
-        reset, a detector that fired on a real fault would carry a residual
-        accumulator value into the recovery period, potentially firing again
-        on the first legitimate event after healing — a false alarm at exactly
-        the worst moment.
+        Explicit reset for the healing layer after a confirmed fault is
+        remediated. Without a reset, a residual accumulator value carried into
+        the recovery period could fire again on the first legitimate event
+        after healing — a false alarm at the worst possible moment.
         """
         key = (stage_id, metric)
         self._s_upper.pop(key, None)

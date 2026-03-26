@@ -1,11 +1,10 @@
 """
 Unit and integration tests for SeasonalBaselineModel, BaselineFitter, BaselineStore.
 
-I'm splitting tests into two classes: pure in-memory tests (no DB) and
-container-backed integration tests. The split keeps the fast unit tests runnable
-without Docker and makes the integration boundary explicit — any test in
-TestBaselineFitterIntegration that fails must be a DB or migration problem,
-not a baseline arithmetic bug.
+Split into pure in-memory tests (no DB) and container-backed integration tests.
+The split keeps fast unit tests runnable without Docker and makes the integration
+boundary explicit — failures in TestBaselineFitterIntegration are DB or migration
+problems, not baseline arithmetic bugs.
 """
 from __future__ import annotations
 
@@ -115,10 +114,8 @@ class TestSeasonalBaselineModel:
 
     def test_z_score_computed_correctly(self) -> None:
         """
-        I'm testing with mean=50, std=10, value=60 to get an expected z-score
-        of 1.0. This is the simplest possible check that the formula
-        (value - mean) / std is applied in the correct order — swapping
-        numerator and denominator or negating would produce -1.0.
+        mean=50, std=10, value=60 gives expected z=1.0. Swapping numerator and
+        denominator or negating would produce -1.0 — catches formula order bugs.
         """
         # 2024-01-01 00:08:00 → Monday 8am → hour_of_week = 8
         event_time = datetime(2024, 1, 1, 8, 0, tzinfo=timezone.utc)
@@ -130,10 +127,9 @@ class TestSeasonalBaselineModel:
 
     def test_z_score_returns_none_when_std_is_zero(self) -> None:
         """
-        I'm asserting None (not 0.0 or inf) when std=0 because returning
-        either of those would propagate into CUSUM as a meaningful deviation.
-        None forces the caller to skip the update — the correct behaviour when
-        the baseline is degenerate.
+        Must return None (not 0.0 or inf) when std=0 — returning either value
+        would propagate into CUSUM as a meaningful deviation. None forces the
+        caller to skip the update when the baseline is degenerate.
         """
         event_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
         key = BaselineKey("src", 0, "latency_ms")
@@ -148,10 +144,9 @@ class TestSeasonalBaselineModel:
 
     def test_z_score_uses_event_time_not_wall_time(self) -> None:
         """
-        I'm verifying that a historical event_time (different hour_of_week than
-        the current wall time) correctly looks up the historical slot. If the
-        implementation used wall time, this test would fail unless the test
-        happened to run at exactly Monday 8am.
+        A historical event_time must look up the historical slot. If the
+        implementation used wall time, this test would fail unless it ran at
+        exactly Monday 8am.
         """
         # Monday 8am = hour_of_week 8
         monday_8am = datetime(2024, 1, 1, 8, 0, tzinfo=timezone.utc)
@@ -179,10 +174,9 @@ class TestSeasonalBaselineModel:
 
 class _StubFitter:
     """
-    I'm using a hand-rolled stub rather than unittest.mock because the mock
-    library's call_count is reset on assignment, which would require careful
-    ordering in tests. The stub's call_count is an explicit integer that
-    only increments on fit_and_persist() — easier to reason about in assertions.
+    Hand-rolled stub rather than unittest.mock because mock's call_count resets
+    on assignment, requiring careful test ordering. This stub's call_count is
+    an explicit integer that increments only on fit_and_persist().
     """
 
     def __init__(self, model: SeasonalBaselineModel) -> None:
@@ -212,9 +206,9 @@ class TestBaselineStore:
 
     def test_get_model_uses_cache_within_ttl(self) -> None:
         """
-        I'm using a very long TTL (3600s) so the cache is guaranteed to be
-        fresh on the second call regardless of how slowly the test runs.
-        Testing with a short TTL would require sleeping, which is fragile in CI.
+        TTL of 3600s guarantees the cache is fresh on the second call regardless
+        of test execution speed. A short TTL would require sleeping, which is
+        fragile in CI.
         """
         stub = _StubFitter(self._empty_model())
         store = BaselineStore(stub, ttl_s=3600.0)
@@ -227,9 +221,8 @@ class TestBaselineStore:
 
     def test_get_model_refits_after_ttl_expires(self) -> None:
         """
-        I'm using ttl_s=0.05 (50ms) so the test doesn't need a long sleep.
-        The sleep is 80ms to give a 30ms margin above the TTL before the
-        second get_model() call — enough to be reliable without being slow.
+        ttl_s=0.05 (50ms) avoids a long sleep. The 80ms sleep gives a 30ms
+        margin above the TTL before the second call — reliable without being slow.
         """
         stub = _StubFitter(self._empty_model())
         store = BaselineStore(stub, ttl_s=0.05)
@@ -260,11 +253,10 @@ class TestBaselineStore:
 @pytest.fixture(scope="module")
 def baseline_db():
     """
-    I'm using a module-scoped fixture with a fresh Postgres container so the
-    baseline tests are isolated from the ingestion worker tests. The ingestion
-    worker tests insert events at 2024 timestamps; mixing those with the
-    recent timestamps this test inserts would corrupt the hour-of-week
-    groupings the fitter produces.
+    Module-scoped fixture with a fresh Postgres container to isolate from the
+    ingestion worker tests. The worker tests insert 2024 timestamps; mixing
+    those with recent timestamps would corrupt the hour-of-week groupings the
+    fitter produces.
     """
     with PostgresContainer(POSTGRES_IMAGE) as pg:
         db_url = pg.get_connection_url().replace(
@@ -283,10 +275,10 @@ def _insert_events(
     status: str = "ok",
 ) -> None:
     """
-    I'm inserting directly via raw SQL rather than ORM to avoid importing
-    PipelineMetric and triggering the partitioning constraint. The events
-    land in the DEFAULT partition (timestamps are recent/2026) which is
-    correct — the baseline fitter doesn't care which partition holds the data.
+    Inserts directly via raw SQL to avoid the PipelineMetric ORM and
+    partitioning constraint. Events land in the DEFAULT partition (recent
+    timestamps) — the baseline fitter doesn't care which partition holds the
+    data.
     """
     engine = create_engine(db_url)
     rows = [
@@ -319,22 +311,21 @@ def _insert_events(
 
 class TestBaselineFitterIntegration:
     """
-    I'm inserting 50 events per (stage, hour_of_week) slot to get stable
-    enough statistics for the 5% recovery assertion. With fewer events the
-    sample mean can deviate significantly from the true mean by chance —
-    50 events gives a standard error of latency_std / sqrt(50) ≈ 0.7ms for
-    a 5ms std, which is well within 5% of a 50ms true mean.
+    50 events per (stage, hour_of_week) slot for stable statistics in the 5%
+    recovery assertion. Fewer events risk large sample mean deviation — 50
+    gives a standard error of latency_std / sqrt(50) ≈ 0.7ms for a 5ms std,
+    well within 5% of a 50ms true mean.
     """
 
     N_PER_SLOT = 50
 
     def _slot_times(self, how: int, n: int) -> List[datetime]:
         """
-        Generate N recent timestamps that all fall in the given hour_of_week
-        slot. I'm setting the candidate's hour to target_hour first, then
-        walking backwards by day until the weekday matches. Subtracting whole
-        timedelta(days=N) without replacing the hour would keep the clock at
-        the current hour, never reaching the target hour.
+        Generates N recent timestamps that all fall in the given hour_of_week
+        slot. Sets the candidate hour to target_hour first, then walks backward
+        by day until the weekday matches — subtracting whole days without
+        replacing the hour would keep the clock at the current hour and never
+        reach the target.
         """
         now = datetime.now(timezone.utc)
         target_weekday = how // 24  # 0=Monday
@@ -351,10 +342,9 @@ class TestBaselineFitterIntegration:
         self, baseline_db: str
     ) -> None:
         """
-        I'm using two hour_of_week slots with very different latency means
-        (50ms vs 150ms) so any cross-slot contamination in the SQL GROUP BY
-        would be immediately visible — the recovered mean would be the average
-        of the two (100ms) rather than the injected value.
+        Two slots with very different means (50ms vs 150ms) so cross-slot
+        contamination in the SQL GROUP BY is immediately visible — the recovered
+        mean would be ~100ms (the average) rather than the injected value.
         """
         # Use Monday 2am (how=2) and Monday 6am (how=6) — unlikely to clash
         # with wall clock time so _slot_times always finds a past occurrence.
@@ -381,10 +371,9 @@ class TestBaselineFitterIntegration:
 
     def test_fit_populates_stage_baselines_table(self, baseline_db: str) -> None:
         """
-        I'm asserting DB row count rather than just checking the in-memory model
-        because the model is built from the query result — if the UPSERT failed
-        silently, the model would still be correct but the table would be empty,
-        breaking every future process restart that reads from the table.
+        Asserts DB row count rather than just the in-memory model — if the UPSERT
+        failed silently, the model would still be correct but the table would be
+        empty, breaking every future process restart that reads from it.
         """
         engine = create_engine(baseline_db)
         with engine.connect() as conn:
@@ -400,10 +389,9 @@ class TestBaselineFitterIntegration:
 
     def test_fit_returns_empty_model_with_no_data(self, baseline_db: str) -> None:
         """
-        I'm testing a stage_id that was never inserted to verify fit_and_persist()
-        returns an empty model rather than raising. An empty model is the correct
-        result — the detection layer should gate on model.get() returning None
-        rather than expecting the fitter to raise for missing stages.
+        A stage_id never inserted must return an empty model (not raise). The
+        detection layer gates on model.get() returning None — the fitter must
+        not raise for missing stages.
         """
         fitter = BaselineFitter(baseline_db, lookback_days=28)
         model = fitter.fit_and_persist()
@@ -415,9 +403,9 @@ class TestBaselineFitterIntegration:
 
     def test_fit_upserts_on_repeated_calls(self, baseline_db: str) -> None:
         """
-        I'm verifying that calling fit_and_persist() twice on the same data
-        does not duplicate rows. The UNIQUE constraint + ON CONFLICT DO UPDATE
-        must leave exactly one row per (stage_id, hour_of_week, metric) slot.
+        Two fit_and_persist() calls on the same data must not duplicate rows.
+        The UNIQUE constraint + ON CONFLICT DO UPDATE must leave exactly one row
+        per (stage_id, hour_of_week, metric) slot.
         """
         fitter = BaselineFitter(baseline_db, lookback_days=28)
         fitter.fit_and_persist()

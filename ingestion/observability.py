@@ -11,13 +11,10 @@ from prometheus_client import make_wsgi_app
 # ---------------------------------------------------------------------------
 # Prometheus metrics
 #
-# I'm defining all metrics at module level as singletons rather than
-# instantiating them inside classes. prometheus_client raises a
-# ValueError if two collectors with the same name are registered to the
-# same registry — that would happen every time a MetricConsumer or
-# IngestionWorker is constructed in tests. Module-level singletons are
-# registered exactly once at import time, which is the prometheus_client
-# recommended pattern.
+# Defined at module level as singletons: prometheus_client raises ValueError
+# if two collectors share the same name in the same registry, which would
+# happen on every MetricConsumer or IngestionWorker construction in tests.
+# Module-level singletons register exactly once at import time.
 # ---------------------------------------------------------------------------
 
 RECORDS_CONSUMED = prom.Counter(
@@ -32,10 +29,9 @@ RECORDS_WRITTEN = prom.Counter(
     ["stage_id"],
 )
 
-# I'm not labelling DLQ events by stage_id because the whole reason a message
-# lands in the DLQ is that we couldn't deserialise it — we have no stage_id
-# to label with. A stage_id="unknown" label would look meaningful but carry
-# no actual information, which is worse than no label at all.
+# DLQ events are not labelled by stage_id: a message lands in the DLQ because
+# it couldn't be deserialised, so no stage_id is available. stage_id="unknown"
+# would look meaningful but carry no actual information.
 DLQ_EVENTS = prom.Counter(
     "ingestion_dlq_events_total",
     "Total records routed to the DLQ due to deserialisation failure.",
@@ -44,10 +40,9 @@ DLQ_EVENTS = prom.Counter(
 WRITE_LATENCY = prom.Histogram(
     "ingestion_write_latency_seconds",
     "Wall time for a single PostgreSQL batch INSERT, in seconds.",
-    # I'm using sub-10ms buckets at the low end because our target p99 for
-    # a 500-record batch is under 50ms. The default prometheus_client buckets
-    # top out at 10s which would compress all our normal traffic into the first
-    # two buckets, making the histogram useless for latency percentile estimation.
+    # Sub-10ms buckets at the low end: target p99 for a 500-record batch is
+    # under 50ms. Default prometheus_client buckets top out at 10s and would
+    # compress all normal traffic into the first two buckets.
     buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
 )
 
@@ -65,16 +60,14 @@ CONSUMER_LAG = prom.Gauge(
 
 def configure_structlog() -> None:
     """
-    I'm configuring structlog with JSON output rather than the default
-    key=value format because the ingestion layer runs in a container whose
-    stdout is scraped by a log aggregator (Loki, CloudWatch, etc.). JSON
-    lets the aggregator parse fields without a custom regex, which means
-    trace_id and stage_id become filterable dimensions automatically.
+    Configures structlog with JSON output rather than key=value. The ingestion
+    layer runs in a container whose stdout is scraped by a log aggregator
+    (Loki, CloudWatch, etc.); JSON lets the aggregator parse fields without a
+    custom regex, making trace_id and stage_id filterable dimensions automatically.
 
-    I'm using PrintLoggerFactory (stdout) rather than stdlib logging because
-    the ingestion process is a single-purpose worker — there is no existing
-    logging hierarchy to integrate with, and the stdlib bridge adds latency
-    from the extra handler dispatch for no benefit.
+    PrintLoggerFactory (stdout) instead of stdlib logging: no existing logging
+    hierarchy to integrate with, and the stdlib bridge adds handler-dispatch
+    latency for no benefit.
     """
     structlog.configure(
         processors=[
@@ -99,10 +92,9 @@ def configure_structlog() -> None:
 
 class _SilentHandler(WSGIRequestHandler):
     """
-    I'm suppressing the per-request access log that WSGIRequestHandler writes
-    to stderr by default. In production the scrape happens every 15 seconds —
-    that's 4 log lines per minute of pure noise that drowns out real events.
-    In tests it generates output that clutters the pytest capture buffer.
+    Suppresses the per-request access log written to stderr by default.
+    Prometheus scrapes every 15 seconds — 4 log lines per minute of noise that
+    drowns real events in production and clutters the pytest capture buffer in tests.
     """
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
@@ -111,22 +103,18 @@ class _SilentHandler(WSGIRequestHandler):
 
 class MetricsServer:
     """
-    I'm using wsgiref.simple_server rather than prometheus_client.start_http_server
-    because start_http_server's return type changed between prometheus_client
-    0.16 and 0.20 (from None to a tuple), making it impossible to call
-    shutdown() portably. wsgiref is stdlib and gives us clean lifecycle control:
-    start() begins serving in a daemon thread, stop() calls httpd.shutdown()
-    synchronously so tests can tear down without a sleep.
+    Uses wsgiref.simple_server rather than prometheus_client.start_http_server:
+    start_http_server's return type changed between 0.16 and 0.20 (None → tuple),
+    making shutdown() unportable. wsgiref is stdlib and gives clean lifecycle
+    control: start() serves in a daemon thread, stop() calls httpd.shutdown()
+    synchronously so tests tear down without a sleep.
 
-    I'm binding to 127.0.0.1 rather than 0.0.0.0 because the /metrics
-    endpoint should only be reachable by a local Prometheus sidecar or test
-    process. Binding to all interfaces on a container would expose internal
-    counters to whatever else is on the network.
+    Bound to 127.0.0.1 only — /metrics should be reachable by a local Prometheus
+    sidecar, not exposed to the container network.
     """
 
     def __init__(self, port: int = 0) -> None:
-        # port=0 lets the OS assign a free port — critical for tests running
-        # in parallel so they don't collide on a hardcoded port number.
+        # port=0: OS assigns a free port, preventing collisions in parallel tests.
         self._httpd = make_server("127.0.0.1", port, make_wsgi_app(), handler_class=_SilentHandler)
         self._port = self._httpd.server_address[1]
         self._thread = threading.Thread(

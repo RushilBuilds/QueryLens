@@ -15,11 +15,9 @@ SIM_START = datetime(2024, 1, 1, 0, 0, 0)
 
 def _minimal_topology() -> PipelineTopologyGraph:
     """
-    I'm using a two-stage topology here rather than the full five-stage fixture
-    because integration tests need enough stages to verify cross-stage behaviour
-    but not so many that event volumes make assertions slow. Two stages (one source,
-    one sink) covers the important cases: events from different stages, different
-    RNG streams per stage, and fault targeting a specific stage.
+    Two-stage topology rather than the full five-stage fixture: enough to verify
+    cross-stage behaviour (separate RNG streams, fault targeting) without event
+    volumes that slow assertions.
     """
     return PipelineTopologyGraph([
         PipelineStage(stage_id="src", stage_type="source", upstream_ids=[], propagation_delay_ms=0.0),
@@ -47,9 +45,9 @@ def _empty_injector(sim_start: datetime) -> FaultInjector:
 
 def test_clock_current_time_starts_at_simulation_start() -> None:
     """
-    I'm testing the initial state separately from advance() so that a bug
-    which initialises tick_count to 1 instead of 0 fails here rather than
-    producing an off-by-one that only surfaces in timing-sensitive detection tests.
+    Initial state tested separately from advance() so a tick_count=1 initialisation
+    bug fails here rather than producing an off-by-one that only surfaces in
+    timing-sensitive detection tests.
     """
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=1000.0)
     assert clock.current_time == SIM_START
@@ -59,11 +57,9 @@ def test_clock_current_time_starts_at_simulation_start() -> None:
 
 def test_clock_advances_by_tick_interval() -> None:
     """
-    I'm verifying exact timedelta equality rather than a float comparison to
-    guard against the floating-point drift that motivated the multiplicative
-    timestamp design. If the implementation switches to cumulative addition
-    this test may still pass on small tick counts, but the drift test below
-    will catch it.
+    Exact timedelta equality rather than float comparison guards against the
+    floating-point drift that motivated the multiplicative timestamp design.
+    The drift test below catches cumulative-addition regressions at scale.
     """
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=250.0)
     clock.advance()
@@ -77,11 +73,9 @@ def test_clock_advances_by_tick_interval() -> None:
 
 def test_clock_no_drift_over_many_ticks() -> None:
     """
-    I'm running 100,000 ticks at 1ms each to expose the floating-point drift
-    that would occur with cumulative timedelta addition. The multiplicative
-    implementation must land within one microsecond of the exact 100-second mark.
-    Cumulative addition on most platforms would drift by 10–50 microseconds over
-    this many ticks.
+    100,000 ticks at 1ms each exposes floating-point drift from cumulative timedelta
+    addition. The multiplicative implementation must land within 1 microsecond of
+    the 100-second mark; cumulative addition typically drifts 10-50 microseconds.
     """
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=1.0)
     for _ in range(100_000):
@@ -102,10 +96,9 @@ def test_clock_no_drift_over_many_ticks() -> None:
 
 def test_engine_yields_events_for_all_stages() -> None:
     """
-    I'm checking that both stages contribute events rather than just asserting
-    a total event count. A bug that only generates events for the first stage
-    in topology.all_stages would produce the right total count from a single stage
-    and pass a count-only assertion.
+    Both stages must contribute events. A bug generating events only for the first
+    stage in topology.all_stages would produce the right total count from a single
+    stage and pass a count-only assertion.
     """
     topology = _minimal_topology()
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=1000.0)
@@ -127,10 +120,9 @@ def test_engine_yields_events_for_all_stages() -> None:
 
 def test_engine_events_are_ordered_by_event_time() -> None:
     """
-    I'm asserting timestamp ordering because the ingestion layer and detection
-    layer both assume events arrive in chronological order. An unsorted event
-    stream would corrupt sliding window aggregator state in Milestone 9 in a
-    way that would be very difficult to diagnose.
+    Both the ingestion and detection layers assume chronological order. An unsorted
+    stream would corrupt sliding window aggregator state in a way that is very
+    difficult to diagnose.
     """
     topology = _minimal_topology()
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=1000.0)
@@ -151,10 +143,9 @@ def test_engine_events_are_ordered_by_event_time() -> None:
 
 def test_engine_events_fall_within_simulation_window() -> None:
     """
-    I'm verifying the simulation window boundary because an off-by-one in the
-    pre-generation filter could include events that technically belong to tick
-    n+1, which would shift fault-label alignment for events near the window edge
-    and produce incorrect ground-truth counts in the detection benchmark.
+    An off-by-one in the pre-generation filter could include events belonging to
+    tick n+1, shifting fault-label alignment near the window edge and producing
+    incorrect ground-truth counts in the detection benchmark.
     """
     n_ticks = 10
     tick_interval_ms = 1000.0
@@ -180,10 +171,9 @@ def test_engine_events_fall_within_simulation_window() -> None:
 
 def test_engine_applies_fault_labels_in_active_window() -> None:
     """
-    I'm running a fault that covers ticks 5–10 of a 20-tick simulation and
-    asserting that events in that window carry the expected fault_label while
-    events outside it do not. This verifies that SimulatorEngine correctly
-    threads FaultInjector through the event stream rather than bypassing it.
+    Fault covering ticks 5-10 of a 20-tick simulation. Events inside the window
+    must carry fault_label; events outside must not. Verifies SimulatorEngine
+    correctly threads FaultInjector through the event stream.
     """
     topology = _minimal_topology()
     clock = SimulationClock(start_time=SIM_START, tick_interval_ms=1000.0)
@@ -234,11 +224,9 @@ def test_engine_applies_fault_labels_in_active_window() -> None:
 
 def test_scenario_config_loads_from_yaml() -> None:
     """
-    I'm testing against the actual scenario_example.yaml on disk rather than
-    an inline YAML string because this test also validates that the config file
-    is well-formed and that the topology path resolution works from the config
-    directory. A test against an inline string would pass even if the file on
-    disk had broken field names or a stale topology path.
+    Tested against the actual scenario_example.yaml on disk, not an inline string:
+    validates that the file is well-formed and that topology path resolution works
+    from the config directory.
     """
     config = ScenarioConfig.load(SCENARIO_PATH)
     assert config.name == "latency_spike_source_postgres"
@@ -246,15 +234,11 @@ def test_scenario_config_loads_from_yaml() -> None:
 
 def test_identical_seeds_produce_identical_event_streams() -> None:
     """
-    I'm calling build_engine() twice rather than run() twice on the same engine
-    because run() is designed for single use — calling it a second time on the
-    same engine would continue from the advanced clock and consumed RNG state,
-    not restart from the beginning. build_engine() is the documented API for
-    getting a fresh, identically-seeded engine.
+    build_engine() called twice rather than run() twice: run() continues from
+    the advanced clock and consumed RNG state, not restart from the beginning.
 
-    I'm comparing via dataclasses.asdict() rather than direct field comparison so
-    that any new fields added to PipelineEvent in the future are automatically
-    included in the check without requiring a test update.
+    dataclasses.asdict() used for comparison so new PipelineEvent fields are
+    automatically included without a test update.
     """
     config = ScenarioConfig.load(SCENARIO_PATH)
 
@@ -275,10 +259,9 @@ def test_identical_seeds_produce_identical_event_streams() -> None:
 
 def test_different_seeds_produce_different_event_streams() -> None:
     """
-    I'm testing seed sensitivity because a ScenarioConfig implementation that
-    ignores the rng_seed and always uses the same fixed seed would pass the
-    identical-seed test above while silently making all scenarios produce the
-    same data. This test ensures the seed actually drives the RNG.
+    An implementation that ignores rng_seed and uses a fixed seed would pass
+    the identical-seed test above while silently making all scenarios produce
+    the same data. This test confirms the seed actually drives the RNG.
     """
     config_a = ScenarioConfig.load(SCENARIO_PATH)
 

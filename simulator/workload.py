@@ -12,17 +12,13 @@ from simulator.models import PipelineEvent
 @dataclass
 class WorkloadProfile:
     """
-    I'm keeping WorkloadProfile as a pure value object with no generation logic so it
-    can round-trip cleanly through YAML for ScenarioConfig. Mixing RNG state or
-    generation behaviour into this class would make serialization brittle and force
-    ScenarioConfig to reconstruct generator internals from opaque state.
+    Pure value object with no generation logic so it round-trips cleanly through
+    YAML for ScenarioConfig.
 
-    payload_mean_bytes and payload_std_bytes parameterise a log-normal distribution,
-    not a normal one. Payload sizes in real pipelines are strictly positive and
-    right-skewed — a handful of large batches alongside many small ones — which
-    log-normal captures naturally. A normal distribution would produce negative sizes
-    at the low tail, which is physically meaningless and would corrupt downstream
-    statistics.
+    payload_mean_bytes and payload_std_bytes parameterise a log-normal distribution —
+    payload sizes in real pipelines are strictly positive and right-skewed, which
+    log-normal captures naturally. A normal distribution produces negative sizes at
+    the low tail.
     """
 
     arrival_rate_lambda: float  # mean events per second (λ in the Poisson process)
@@ -33,17 +29,13 @@ class WorkloadProfile:
 
 class PoissonEventGenerator:
     """
-    I'm drawing all inter-arrival times and payload sizes in two vectorised numpy calls
-    before entering the yield loop rather than calling into numpy once per event. At
-    n=10,000 the per-call approach costs ~8ms in Python/C boundary crossings; the
-    batch approach costs ~0.1ms. The trade-off is a single upfront allocation of
-    n_events floats — acceptable because we never generate more than ~1M events in a
-    scenario, which fits comfortably in memory.
+    All inter-arrival times and payload sizes are drawn in two vectorised numpy
+    calls before entering the yield loop. At n=10,000 the per-call approach costs
+    ~8ms in Python/C boundary crossings; the batch approach costs ~0.1ms.
 
-    The generator accepts an optional seeded RNG so SimulatorEngine can inject one
-    shared generator across all stage generators. This matters for reproducibility:
-    if each generator seeded numpy's global state independently, scenario replay would
-    depend on construction order, which is fragile.
+    Accepts an optional seeded RNG so SimulatorEngine can inject one shared
+    generator across all stage generators, ensuring reproducibility regardless
+    of construction order.
     """
 
     def __init__(
@@ -56,10 +48,9 @@ class PoissonEventGenerator:
         self._stage_id = stage_id
         self._rng = rng if rng is not None else np.random.default_rng()
 
-        # I'm precomputing the log-normal mu/sigma from the caller's desired mean and
-        # std using moment-matching rather than exposing log-space parameters. Callers
-        # reason in bytes, not in log-space, and converting at construction time means
-        # generate() pays zero cost per call. The moment-matching equations are:
+        # Precompute log-normal mu/sigma from the caller's desired mean and std via
+        # moment-matching rather than exposing log-space parameters. Callers reason
+        # in bytes, not in log-space. Moment-matching equations:
         #   sigma^2 = log(1 + (std/mean)^2)
         #   mu      = log(mean^2 / sqrt(mean^2 + std^2))
         m = profile.payload_mean_bytes
@@ -73,16 +64,14 @@ class PoissonEventGenerator:
         start_time: Optional[datetime] = None,
     ) -> Iterator[PipelineEvent]:
         """
-        I'm defaulting start_time to utcnow() when None only as a convenience for
-        exploratory use. Any test or scenario that needs reproducibility must pass an
-        explicit start_time — wall-clock defaulting would make inter-arrival delta
-        assertions non-deterministic even with a seeded RNG.
+        Defaults start_time to utcnow() only as a convenience for exploratory use.
+        Any test or scenario that needs reproducibility must pass an explicit
+        start_time — wall-clock defaulting makes inter-arrival delta assertions
+        non-deterministic even with a seeded RNG.
 
-        Latency is modelled as a log-normal independent of payload size. A correlation
-        model would be more realistic but requires calibrating a joint distribution
-        parameter that we don't have data for yet. Using independent log-normals gives
-        the detectors plausible variance to work with until Milestone 10 fits real
-        baselines from stored metrics.
+        Latency is modelled as a log-normal independent of payload size. Independent
+        log-normals give the detectors plausible variance until a real baseline fit
+        provides calibrated parameters.
         """
         if start_time is None:
             start_time = datetime.utcnow()
@@ -99,8 +88,7 @@ class PoissonEventGenerator:
         ).astype(int)
 
         # Median ~33ms, right-skewed tail — representative of a moderately loaded
-        # transform stage. Made configurable in WorkloadProfile in a later milestone
-        # once the baseline fitter gives us real numbers to calibrate against.
+        # transform stage.
         latencies_ms = self._rng.lognormal(mean=3.5, sigma=0.4, size=n_events)
 
         row_counts = self._rng.poisson(lam=1000, size=n_events)

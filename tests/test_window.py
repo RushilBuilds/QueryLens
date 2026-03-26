@@ -1,14 +1,13 @@
 """
 Unit tests for RingBuffer, WindowConfig, and SlidingWindowAggregator.
 
-I'm testing against numpy.percentile as the reference implementation rather
-than hand-computing expected values because np.percentile with linear
-interpolation is exactly the computation we call in SlidingWindowAggregator.
-Any deviation between the two means the aggregator is calling a different
-function — not that either value is wrong.
+Tests against numpy.percentile as the reference implementation rather than
+hand-computing expected values — np.percentile with linear interpolation is
+exactly the computation called in SlidingWindowAggregator. Any deviation
+means the aggregator is calling a different function, not that either value
+is wrong.
 
-No containers or external services are needed here. All tests run on
-synthetic event sequences with deterministic timestamps.
+No containers or external services required.
 """
 from __future__ import annotations
 
@@ -103,9 +102,8 @@ class TestRingBuffer:
 
     def test_empty_buffer_returns_empty_array(self) -> None:
         """
-        I'm testing the empty case first because it is the most common source
-        of IndexError bugs — a buffer with count=0 but head=0 could produce
-        indices that index into uninitialized slots.
+        Empty case is tested first — it is the most common source of IndexError
+        bugs. A buffer with count=0 but head=0 could index into uninitialised slots.
         """
         buf = RingBuffer(capacity=10)
         result = buf.window_values(cutoff_s=0.0)
@@ -123,9 +121,8 @@ class TestRingBuffer:
 
     def test_entries_before_cutoff_are_excluded(self) -> None:
         """
-        I'm verifying exclusion at the boundary specifically because off-by-one
-        errors in >= vs > comparisons are the most common window bug. An entry
-        at exactly cutoff_s must be included (>= semantics).
+        Off-by-one errors in >= vs > comparisons are the most common window bug.
+        An entry at exactly cutoff_s must be included (>= semantics).
         """
         buf = RingBuffer(capacity=10)
         buf.push(timestamp_s=50.0, value=1.0)   # before window
@@ -137,10 +134,9 @@ class TestRingBuffer:
 
     def test_insertion_order_preserved_in_returned_values(self) -> None:
         """
-        I'm testing ordering because SlidingWindowAggregator passes the result
-        directly to np.percentile, which is order-independent — but CUSUM
-        will read the values in sequence to accumulate deviations. Out-of-order
-        values would corrupt the accumulator.
+        SlidingWindowAggregator passes the result to np.percentile (order-
+        independent), but CUSUM reads values sequentially to accumulate
+        deviations. Out-of-order values would corrupt the accumulator.
         """
         buf = RingBuffer(capacity=5)
         for i in range(5):
@@ -151,10 +147,9 @@ class TestRingBuffer:
 
     def test_overwrites_oldest_entry_when_at_capacity(self) -> None:
         """
-        I'm testing the wrap-around case with capacity=3 so the oldest entry
-        is overwritten after exactly 4 inserts. A larger capacity would require
-        more inserts to expose the wrap-around bug and make the test slower
-        to reason about.
+        capacity=3 means the oldest entry is overwritten after exactly 4
+        inserts. A larger capacity requires more inserts to expose wrap-around
+        bugs and makes the test harder to reason about.
         """
         buf = RingBuffer(capacity=3)
         buf.push(1.0, 100.0)  # will be overwritten
@@ -191,10 +186,8 @@ class TestSlidingWindowAggregator:
 
     def test_percentiles_match_numpy_reference(self) -> None:
         """
-        I'm using 20 values with a known distribution so the percentile
-        computation is stable. With fewer than ~10 values, linear interpolation
-        can produce results that feel surprising even though they are correct,
-        which would make this test harder to reason about.
+        20 values used for stability — fewer than ~10 produces linear-interpolation
+        results that are technically correct but harder to reason about.
         """
         config = _default_config(window_duration_s=120.0, min_sample_count=5)
         agg = SlidingWindowAggregator(config)
@@ -214,9 +207,8 @@ class TestSlidingWindowAggregator:
 
     def test_events_outside_window_are_excluded(self) -> None:
         """
-        I'm using a 30-second window and inserting events at t=0 and t=60 so
-        only the t=60 event falls inside the window when compute() is called
-        at t=70. The t=0 event is 70 seconds old — outside the 30-second window.
+        30-second window, events at t=0 and t=60. When compute() runs at t=70
+        the t=0 event is 70 seconds old and must be excluded.
         """
         config = _default_config(window_duration_s=30.0, min_sample_count=1)
         agg = SlidingWindowAggregator(config)
@@ -233,10 +225,9 @@ class TestSlidingWindowAggregator:
 
     def test_is_stable_false_below_min_sample_count(self) -> None:
         """
-        I'm verifying that all stat fields are None when is_stable is False.
-        Returning 0.0 would look like a real latency measurement to CUSUM and
-        trigger a false alert on startup — None forces the caller to gate on
-        is_stable before using any stat.
+        All stat fields must be None when is_stable is False. Returning 0.0
+        would look like a real latency measurement to CUSUM and trigger a false
+        alert on startup.
         """
         config = _default_config(min_sample_count=10)
         agg = SlidingWindowAggregator(config)
@@ -257,9 +248,9 @@ class TestSlidingWindowAggregator:
 
     def test_error_rate_computed_from_status_field(self) -> None:
         """
-        I'm using 4 ok + 1 error to get an expected error rate of 0.2.
-        The aggregator must derive error_rate from status at update() time
-        so the detector layer never needs to see the raw "ok" string.
+        4 ok + 1 error → expected error_rate of 0.2. The aggregator derives
+        error_rate at update() time so the detector layer never sees the raw
+        "ok" string.
         """
         config = _default_config(min_sample_count=1)
         agg = SlidingWindowAggregator(config)
@@ -288,9 +279,9 @@ class TestSlidingWindowAggregator:
 
     def test_independent_buffers_per_stage(self) -> None:
         """
-        I'm asserting that stage A's stats are not contaminated by stage B's
-        events. A shared buffer across stages would produce incorrect percentiles
-        for every stage after the first one is populated.
+        Stage A stats must not be contaminated by stage B events. A shared
+        buffer would produce incorrect percentiles for every stage after the
+        first one is populated.
         """
         config = _default_config(min_sample_count=1)
         agg = SlidingWindowAggregator(config)
@@ -308,10 +299,8 @@ class TestSlidingWindowAggregator:
 
     def test_empty_stage_returns_unstable_zero_sample_count(self) -> None:
         """
-        I'm testing compute() on a stage that has never received any updates
-        to ensure we don't raise a KeyError or return garbage stats. The
-        aggregator lazily creates buffers — an unseen stage_id must return
-        a valid WindowStats with sample_count=0.
+        Buffers are created lazily — an unseen stage_id must return a valid
+        WindowStats with sample_count=0 rather than raising KeyError.
         """
         config = _default_config(min_sample_count=1)
         agg = SlidingWindowAggregator(config)
@@ -336,10 +325,9 @@ class TestSlidingWindowAggregator:
 
     def test_ring_buffer_capacity_limits_retained_samples(self) -> None:
         """
-        I'm using a capacity of 5 and inserting 10 events all within the
-        window to verify that sample_count reflects the buffer cap, not the
-        total events inserted. This ensures the detection layer cannot read
-        more samples than the buffer holds and produce stale percentiles.
+        Capacity=5, 10 inserts all within the window. sample_count must reflect
+        the buffer cap, not total inserts — prevents the detection layer from
+        reading stale percentiles beyond the buffer boundary.
         """
         config = _default_config(
             window_duration_s=300.0,

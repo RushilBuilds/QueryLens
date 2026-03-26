@@ -15,33 +15,28 @@ from simulator.models import PipelineEvent
 _log = structlog.get_logger(__name__)
 
 # DLQ topic receives any message that fails deserialization or schema validation.
-# I'm using a fixed suffix convention (.dlq) rather than a separate config
-# value because the DLQ topic name must always be derivable from the source
-# topic name — if it were configurable, a misconfiguration could silently
-# discard bad messages to /dev/null.
+# Fixed suffix (.dlq) rather than a configurable value: the DLQ topic must always
+# be derivable from the source topic name. A configurable name could silently
+# discard bad messages to /dev/null on misconfiguration.
 DLQ_TOPIC_SUFFIX = ".dlq"
 
 
 @dataclass(frozen=True)
 class ConsumerConfig:
     """
-    I'm grouping consumer tunables here rather than accepting a raw dict of
-    librdkafka config strings because the raw dict makes it impossible to
-    know at a glance which settings we actually care about. The important ones
-    (auto.offset.reset, enable.auto.commit) are particularly easy to
-    misconfigure silently — having them as named fields with documented
-    defaults makes the intent explicit.
+    Named fields rather than a raw librdkafka config dict. auto.offset.reset
+    and enable.auto.commit are easy to misconfigure silently — explicit named
+    fields with documented defaults make the intent clear.
     """
 
     bootstrap_servers: str
     group_id: str
     topic: str
     auto_offset_reset: str = "earliest"
-    # I'm disabling auto-commit unconditionally. Manual commit is the only way
-    # to guarantee at-least-once delivery: we commit the offset only AFTER the
-    # batch has been written to PostgreSQL. Auto-commit would advance the offset
-    # on a timer regardless of whether the write succeeded, turning transient
-    # DB failures into permanent data loss.
+    # Auto-commit disabled unconditionally. Manual commit is the only way to
+    # guarantee at-least-once delivery: offset advances only after the batch
+    # lands in PostgreSQL. Auto-commit on a timer would turn transient DB
+    # failures into permanent data loss.
     enable_auto_commit: bool = False
     session_timeout_ms: int = 30_000
     max_poll_interval_ms: int = 300_000
@@ -54,10 +49,10 @@ class ConsumerConfig:
 @dataclass
 class ConsumedMessage:
     """
-    I'm keeping raw_bytes alongside the parsed event so the DLQ writer can
-    forward the original payload without re-serializing. Re-serializing a
-    partially-parsed event would lose information from fields we failed to
-    parse — the DLQ value must be exactly what the producer sent.
+    raw_bytes retained alongside the parsed event so the DLQ writer forwards
+    the original payload. Re-serializing a partially-parsed event would lose
+    fields that failed to parse — the DLQ value must be exactly what the
+    producer sent.
     """
 
     raw_bytes: bytes
@@ -73,20 +68,15 @@ class ConsumedMessage:
 
 class MetricConsumer:
     """
-    I'm implementing manual offset commit (store + commit after batch write)
-    rather than auto-commit because auto-commit advances the offset on a
-    wall-clock timer independent of write success. A PostgreSQL write failure
-    followed by an auto-commit would cause those records to be skipped on
-    restart — the consumer would resume from the committed offset, never
-    retrying the failed batch. Manual commit gives us the at-least-once
-    guarantee: on crash-restart, the uncommitted batch is replayed from the
-    last committed offset.
+    Manual offset commit (store + commit after batch write) rather than
+    auto-commit. Auto-commit advances the offset on a wall-clock timer
+    independent of write success; a DB failure followed by auto-commit skips
+    those records permanently on restart. Manual commit gives at-least-once
+    delivery: uncommitted batches replay from the last committed offset.
 
-    I'm not using async/await here even though the IngestionWorker is async
-    because confluent_kafka.Consumer is a synchronous C extension. Wrapping
-    it in run_in_executor would add thread pool overhead and complicate error
-    handling without any throughput benefit at our event rate. The worker runs
-    the consumer poll in a sync loop and awaits only the DB write.
+    Synchronous rather than async: confluent_kafka.Consumer is a C extension.
+    run_in_executor would add thread pool overhead with no throughput benefit
+    at this event rate.
     """
 
     def __init__(self, config: ConsumerConfig) -> None:
@@ -106,11 +96,9 @@ class MetricConsumer:
         self._consumer = Consumer(consumer_conf)
         self._consumer.subscribe([config.topic])
 
-        # I'm using a separate Producer for DLQ writes rather than reusing the
-        # main RedpandaProducer because the DLQ producer needs different settings:
-        # acks=1 is acceptable here (DLQ messages are diagnostic, not business
-        # data), and we want fire-and-forget semantics to avoid blocking the
-        # main consume loop on DLQ write failures.
+        # Separate Producer for DLQ writes: acks=1 is acceptable (DLQ messages
+        # are diagnostic, not business data), and fire-and-forget semantics
+        # prevent DLQ write failures from blocking the main consume loop.
         self._dlq_producer = Producer({
             "bootstrap.servers": config.bootstrap_servers,
             "acks": 1,
@@ -119,15 +107,10 @@ class MetricConsumer:
 
     def poll_batch(self, max_records: int, timeout_s: float = 1.0) -> List[ConsumedMessage]:
         """
-        I'm polling for up to max_records messages rather than polling once
-        because a single poll() call returns at most one message. Batching
-        here amortises the per-batch PostgreSQL INSERT overhead: a 500-record
-        batch uses one round trip instead of 500.
-
-        poll() with a non-zero timeout blocks until a message arrives or the
-        timeout elapses. I'm using a short timeout (1.0s default) so the
-        IngestionWorker's flush_interval_s timer can fire even when the topic
-        is quiet.
+        Polls for up to max_records messages (a single poll() returns at most
+        one). Batching amortises the PostgreSQL INSERT overhead: 500 records in
+        one round trip instead of 500. Short timeout (1.0s default) lets
+        flush_interval_s fire even when the topic is quiet.
         """
         batch: List[ConsumedMessage] = []
         while len(batch) < max_records:
@@ -178,11 +161,9 @@ class MetricConsumer:
         self, raw_bytes: bytes, error_context: str, partition: int, offset: int
     ) -> None:
         """
-        I'm wrapping the original payload in a DLQ envelope rather than
-        forwarding it bare so the DLQ consumer knows where the message came
-        from and why it was rejected. The envelope includes the source
-        partition and offset so the original message can be located in the
-        source topic for manual inspection or replay.
+        Wraps the original payload in a DLQ envelope rather than forwarding it
+        bare. The envelope includes source partition and offset so the original
+        message can be located in the source topic for manual inspection.
         """
         envelope = json.dumps({
             "source_topic": self._config.topic,
@@ -208,16 +189,11 @@ class MetricConsumer:
 
     def commit_batch(self, batch: List[ConsumedMessage]) -> None:
         """
-        I'm storing offsets for all messages in the batch (valid and invalid
-        alike) before committing. The DLQ already received the invalid
-        messages, so we do not want to replay them on restart — their offset
-        should advance just like a valid message's offset.
+        Stores offsets for all messages — valid and invalid alike. Invalid
+        messages already went to the DLQ and must not replay on restart.
 
-        store_offsets() marks the offset for the next commit without actually
-        talking to the broker. commit() then syncs all stored offsets to the
-        broker in one request. This two-phase approach lets us store offsets
-        for every message as we process them, then commit once at the end of
-        the batch rather than issuing a broker request per message.
+        store_offsets() marks offsets locally without a broker round-trip;
+        commit() syncs all stored offsets in one request at the end of the batch.
         """
         for msg_meta in batch:
             from confluent_kafka import TopicPartition

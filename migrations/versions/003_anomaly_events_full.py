@@ -19,11 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # I'm using server_default on every new NOT NULL column because the table
-    # may have rows from earlier test runs (it was created as a stub in 001).
-    # The server_default satisfies PostgreSQL's constraint check during ALTER
-    # TABLE; new inserts from AnomalyPersister always provide explicit values
-    # so the default is never used in practice after migration.
+    # server_default on every new NOT NULL column because the table may have rows
+    # from earlier test runs (stub created in 001). Satisfies PostgreSQL's
+    # constraint check during ALTER TABLE; AnomalyPersister always provides
+    # explicit values so the default is never used after migration.
     op.add_column(
         "anomaly_events",
         sa.Column(

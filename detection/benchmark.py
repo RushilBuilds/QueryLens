@@ -12,10 +12,9 @@ from detection.ewma import EWMAConfig, EWMADetector
 from simulator.fault_injection import FAULT_TYPES, FaultInjector, FaultSchedule, FaultSpec
 from simulator.models import PipelineEvent
 
-# I'm fixing the simulation epoch to a Monday 00:00 UTC so that all events
-# land in hour_of_week=0 with the flat baseline. The benchmark does not need
-# time-varying baselines — the goal is measuring detection accuracy for known
-# fault magnitudes, not seasonal model correctness.
+# Fixed to Monday 00:00 UTC so all events land in hour_of_week=0 with the
+# flat baseline. The benchmark measures detection accuracy, not seasonal model
+# correctness, so time-varying baselines are unnecessary.
 _BENCH_EPOCH = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 # Fault magnitudes chosen to produce reliable z-score deviations at the
@@ -34,11 +33,10 @@ _FAULT_MAGNITUDES: Dict[str, float] = {
 @dataclass(frozen=True)
 class BenchmarkConfig:
     """
-    I'm separating BenchmarkConfig from detector configs so the benchmark can
-    be re-run with different detector sensitivity settings without changing the
-    event generation parameters. This lets the benchmark act as a calibration
-    tool: hold event generation fixed, vary detector configs, observe the
-    recall/FPR trade-off.
+    Separates event generation parameters from detector configs so the benchmark
+    can be re-run with different detector sensitivity settings without touching
+    event generation. Holds event generation fixed; vary detector configs to
+    observe the recall/FPR trade-off.
     """
 
     n_warmup_events: int = 50
@@ -68,12 +66,10 @@ class BenchmarkConfig:
     baseline_std_latency: float = 10.0
     baseline_mean_row_count: float = 100.0
     baseline_std_row_count: float = 20.0
-    # I'm using mean=0.0, std=0.1 for error_rate so that a single status='error'
-    # event produces z=10, triggering EWMA immediately and giving CUSUM a large
-    # accumulator increment. The low std is intentional: in a healthy pipeline
-    # the error rate is near zero, and a high std would require sustained errors
-    # to build signal — which is correct for a noisy system but not what we're
-    # modelling here.
+    # mean=0.0, std=0.1 for error_rate: a single status='error' event produces
+    # z=10, triggering EWMA immediately. In a healthy pipeline the error rate is
+    # near zero — a high std would require sustained errors to build signal,
+    # correct for a noisy system but not the model here.
     baseline_mean_error_rate: float = 0.0
     baseline_std_error_rate: float = 0.1
 
@@ -94,10 +90,9 @@ class BenchmarkConfig:
 @dataclass(frozen=True)
 class FaultResult:
     """
-    I'm storing the raw counts alongside the derived rates so callers can
-    aggregate results across multiple benchmark runs without losing precision
-    from intermediate float divisions. Aggregating rates (averaging averages)
-    is statistically incorrect when trial counts differ.
+    Stores raw counts alongside derived rates so callers can aggregate across
+    benchmark runs without losing precision from intermediate float divisions.
+    Averaging rates directly is statistically incorrect when trial counts differ.
     """
 
     fault_type: str
@@ -115,11 +110,9 @@ class FaultResult:
     @property
     def false_positive_rate(self) -> float:
         """
-        I'm defining FPR as anomaly_fires / non_fault_events rather than the
-        classical (FP / (FP + TN)) because each event produces at most one
-        anomaly (or zero), making 'events with false alarms / non-fault events'
-        equivalent to FP / (FP + TN). Both definitions converge at the event
-        granularity.
+        FPR defined as anomaly_fires / non_fault_events. Each event produces at
+        most one anomaly, so this is equivalent to the classical FP / (FP + TN)
+        at event granularity.
         """
         return (
             self.non_fault_fires / self.non_fault_events
@@ -148,9 +141,8 @@ class FaultResult:
 @dataclass
 class BenchmarkReport:
     """
-    I'm storing results keyed by (detector_type, fault_type) rather than
-    nested dicts so the report renderer can sort by any key without
-    restructuring the data.
+    Stores results as a flat list rather than nested dicts so the report
+    renderer can sort by any key without restructuring.
     """
 
     results: List[FaultResult] = field(default_factory=list)
@@ -170,10 +162,9 @@ class BenchmarkReport:
 
     def to_markdown(self) -> str:
         """
-        I'm generating the report as a single Markdown string rather than
-        writing directly to a file so that callers (tests, CI scripts) decide
-        where the output goes. The test writes it to docs/; a CI summary job
-        can write it to a step output.
+        Returns the report as a Markdown string rather than writing to a file
+        so callers decide where output goes — tests write to docs/, CI jobs
+        can write to step outputs.
         """
         lines = [
             "# Detection Accuracy Benchmark",
@@ -243,18 +234,14 @@ class BenchmarkReport:
 
 class DetectorBenchmark:
     """
-    I'm running each fault type as an independent set of trials rather than
-    interleaving faults in a single stream because interleaving would make the
-    detection lag calculation ambiguous — a detector that accumulates signal
-    from a preceding fault window would appear to detect the next fault faster
-    than it actually does. Independent trials with a fresh detector per trial
-    give clean, interpretable lag numbers.
+    Runs each fault type as independent trials rather than interleaving faults
+    in a single stream — interleaving makes detection lag ambiguous because
+    accumulated signal from a preceding window artificially shortens lag for
+    the next. Independent trials with fresh detectors give clean lag numbers.
 
-    I'm not using the SimulatorEngine here because the benchmark needs
-    deterministic, minimal events — not a full topology with Poisson arrivals.
-    The FaultInjector is still used directly so the injected events match
-    exactly what the simulator would produce (same mutation logic, same
-    fault_label propagation).
+    Does not use SimulatorEngine — the benchmark needs deterministic minimal
+    events, not a full topology with Poisson arrivals. FaultInjector is used
+    directly so injected events match exactly what the simulator would produce.
     """
 
     def __init__(self, config: BenchmarkConfig = BenchmarkConfig()) -> None:
@@ -263,10 +250,10 @@ class DetectorBenchmark:
 
     def _build_baseline(self) -> SeasonalBaselineModel:
         """
-        I'm building a flat baseline covering all 168 hour_of_week slots so
-        events at any offset from _BENCH_EPOCH land in a valid baseline slot.
-        All slots share the same mean and std — this benchmark is measuring
-        detector accuracy, not baseline interpolation accuracy.
+        Flat baseline covering all 168 hour_of_week slots so events at any
+        offset from _BENCH_EPOCH land in a valid slot. All slots share the
+        same mean and std — detector accuracy, not baseline interpolation,
+        is what's being measured.
         """
         cfg = self._config
         entries: Dict[BaselineKey, BaselineEntry] = {}
@@ -311,11 +298,10 @@ class DetectorBenchmark:
         trial_seed: int,
     ) -> List[PipelineEvent]:
         """
-        I'm creating a fresh FaultInjector per trial with a different seed so
-        probabilistic faults (dropped_connection, error_burst) sample independent
-        event sequences across trials. Using the same seed would make every trial
-        identical — the recall estimate would then reflect one specific random
-        realisation rather than the expected detection rate.
+        Fresh FaultInjector per trial with a different seed so probabilistic
+        faults (dropped_connection, error_burst) sample independent sequences.
+        Same seed across trials would make recall reflect one random realisation,
+        not the expected detection rate.
         """
         n = self._config.n_fault_events
         spec = FaultSpec(
@@ -353,9 +339,8 @@ class DetectorBenchmark:
              cusum_lag, ewma_lag,
              non_fault_cusum_fires, non_fault_ewma_fires)
 
-        I'm running both detectors in the same loop rather than separate passes
-        to keep trial_index→offset mapping consistent between them. Separate
-        passes could diverge if normal event generation uses any state.
+        Both detectors run in the same loop to keep trial_index→offset mapping
+        consistent. Separate passes could diverge if event generation uses state.
         """
         cfg = self._config
         n_warmup = cfg.n_warmup_events
@@ -412,12 +397,10 @@ class DetectorBenchmark:
 
     def run(self) -> BenchmarkReport:
         """
-        I'm creating fresh detector instances per fault type (not per trial) so
-        each fault type starts from zero accumulator state. Reusing detectors
-        across fault types would cause the state built up during one fault type's
-        trials to artificially inflate the starting accumulator for the next —
-        producing detection lags that are too short for the first trial of each
-        new fault type.
+        Fresh detector instances per fault type (not per trial) so each fault
+        type starts from zero accumulator state. Reusing across fault types
+        would inflate the starting accumulator for the next type, producing
+        artificially short detection lags on the first trial.
         """
         results: List[FaultResult] = []
 

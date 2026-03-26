@@ -5,7 +5,7 @@ The key correctness property is: for a fault propagating from a known root-cause
 stage, the FaultLocalizationEngine must rank the true root cause in the top-2
 candidates in ≥ 85% of test scenarios.
 
-I'm constructing AnomalyEvent objects directly rather than running the full
+AnomalyEvent objects are constructed directly rather than running the full
 simulator + detector stack because the localization engine is stateless with
 respect to how anomalies were detected. Its inputs are (hypothesis, dag) and
 its output is (ranked candidates). End-to-end tests belong in the M30 integration
@@ -112,10 +112,7 @@ class TestAnomalyWindowCollector:
             AnomalyWindowCollector(min_events=0)
 
     def test_single_event_not_emitted_on_add(self) -> None:
-        """
-        I'm confirming that a single event does not immediately close the window —
-        the window stays open until either a gap is detected or flush() is called.
-        """
+        """A single event must not immediately close the window — stays open until gap or flush()."""
         collector = AnomalyWindowCollector(gap_duration_s=30.0)
         event = _anomaly("source_a", SIM_START)
         result = collector.add(event)
@@ -133,9 +130,9 @@ class TestAnomalyWindowCollector:
 
     def test_gap_triggers_window_close(self) -> None:
         """
-        I'm verifying the gap-based close: event at T=0, event at T=60 (> gap=30s)
-        should close the first window and start a second. The first add() returns
-        the first hypothesis; the second event starts the next window.
+        Gap-based close: event at T=0, event at T=60 (> gap=30s) closes the first
+        window and starts a second. The first add() returns the first hypothesis;
+        the second event starts the next window.
         """
         collector = AnomalyWindowCollector(gap_duration_s=30.0)
         e1 = _anomaly("source_a", SIM_START)
@@ -184,9 +181,8 @@ class TestAnomalyWindowCollector:
 
     def test_min_events_suppresses_small_windows(self) -> None:
         """
-        I'm verifying that min_events=2 causes a single-event window to be
-        discarded rather than emitted. The use case: noise-reduction — a single
-        anomaly from one stage is not enough evidence to start a localization.
+        min_events=2 causes a single-event window to be discarded rather than emitted.
+        A single anomaly from one stage is not enough evidence to start a localization.
         """
         collector = AnomalyWindowCollector(gap_duration_s=30.0, min_events=2)
         collector.add(_anomaly("source_a", SIM_START))
@@ -249,11 +245,10 @@ class TestFaultLocalizationEngineBasic:
         self, dag: CausalDAG
     ) -> None:
         """
-        I'm asserting None rather than an empty result when the symptomatic
-        stages have no ancestors. Source stages with no upstream cannot have
-        a root cause further upstream — the fault must originate at the source
-        itself, and 'no candidates' is the correct signal to the healing layer
-        (escalate to operator rather than assign blame to a non-existent upstream).
+        Source stages with no upstream cannot have a root cause further upstream —
+        the fault must originate at the source itself, and 'no candidates' is the
+        correct signal to the healing layer (escalate to operator rather than assign
+        blame to a non-existent upstream).
         """
         engine = FaultLocalizationEngine(dag)
         hypothesis = _hypothesis([
@@ -270,10 +265,7 @@ class TestFaultLocalizationEngineBasic:
     def test_single_downstream_anomaly_ranks_ancestors(
         self, dag: CausalDAG
     ) -> None:
-        """
-        I'm testing with only sink_e anomalous. All four ancestor stages become
-        candidates. The engine must return a result with all four ranked.
-        """
+        """Only sink_e is anomalous; all four ancestor stages become candidates and must be ranked."""
         engine = FaultLocalizationEngine(dag)
         hypothesis = _hypothesis([_anomaly("sink_e", SIM_START)])
         result = engine.localize(hypothesis)
@@ -301,10 +293,8 @@ class TestFaultLocalizationEngineBasic:
         self, dag: CausalDAG
     ) -> None:
         """
-        I'm verifying that when source_a appears in the evidence (it fired an
-        anomaly), it ranks higher than source_d (which did not appear). A stage
-        that shows its own anomaly is stronger evidence than a stage inferred
-        purely through ancestry.
+        A stage that shows its own anomaly is stronger evidence than a stage inferred
+        purely through ancestry — source_a (which fired) must rank above source_d (which did not).
         """
         engine = FaultLocalizationEngine(dag)
         t0 = SIM_START
@@ -330,10 +320,9 @@ class TestFaultLocalizationEngineBasic:
 
 class TestFaultLocalizationRecall:
     """
-    I'm parameterising over 20 scenarios rather than one to get a statistically
-    meaningful recall estimate. Each scenario varies the fault propagation timing
-    to simulate real-world jitter (network delays, processing variance). The
-    recall threshold is ≥ 85% — 17 out of 20 scenarios must rank the true root
+    Parameterised over 20 scenarios for a statistically meaningful recall estimate.
+    Each scenario varies fault propagation timing to simulate real-world jitter.
+    The recall threshold is ≥ 85% — 17 out of 20 scenarios must rank the true root
     cause in the top-2 candidates.
     """
 
@@ -393,9 +382,9 @@ class TestFaultLocalizationRecall:
         self, dag: CausalDAG
     ) -> None:
         """
-        I'm testing the edge case where only the root-cause source stage shows
-        an anomaly (downstream stages haven't fired yet). The engine should
-        rank source_a first since it is both symptomatic and an ancestor candidate.
+        Edge case: only the root-cause source stage has anomalied (downstream stages
+        haven't fired yet). The engine must rank source_a first since it is both
+        symptomatic and an ancestor candidate.
         """
         engine = FaultLocalizationEngine(dag)
         hypothesis = _hypothesis([
@@ -411,9 +400,9 @@ class TestFaultLocalizationRecall:
         self, dag: CausalDAG
     ) -> None:
         """
-        I'm asserting that when the complete propagation chain (source → transforms
-        → sink) all fire, the source ranks above the intermediate transforms. The
-        source has the earliest anomaly time and is ancestor to all downstream stages.
+        When the complete propagation chain fires, the source must rank above
+        intermediate transforms — it has the earliest anomaly time and is ancestor
+        to all downstream stages.
         """
         engine = FaultLocalizationEngine(dag)
         t0 = SIM_START

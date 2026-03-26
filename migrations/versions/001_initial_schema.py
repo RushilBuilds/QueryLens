@@ -19,13 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # I'm using raw SQL for pipeline_metrics rather than op.create_table() because
-    # SQLAlchemy's DDL compiler does not emit the PARTITION BY clause when generating
-    # CREATE TABLE statements — it only supports it as a table-level storage parameter
-    # in newer versions, and Alembic's op.create_table() wraps the compiler directly.
-    # Writing the DDL explicitly gives us full control over the partition declaration
-    # and the child partition CREATE TABLE statements, which must reference the parent
-    # and specify their own PARTITION OF ... FOR VALUES FROM/TO clauses.
+    # Raw SQL used for pipeline_metrics rather than op.create_table(): SQLAlchemy's
+    # DDL compiler does not emit the PARTITION BY clause. Explicit DDL gives full
+    # control over the partition declaration and child PARTITION OF ... FOR VALUES
+    # FROM/TO clauses.
     op.execute("""
         CREATE TABLE pipeline_metrics (
             id          BIGINT GENERATED ALWAYS AS IDENTITY,
@@ -41,12 +38,9 @@ def upgrade() -> None:
         ) PARTITION BY RANGE (event_time)
     """)
 
-    # I'm pre-creating 12 monthly partitions for 2024 because the scenario fixtures
-    # use 2024-01-01 as their simulation start date. Without at least the 2024-01
-    # partition, any INSERT from the smoke test or the scenario runner would land in
-    # the DEFAULT partition — which is fine functionally but would hide missing-partition
-    # bugs until the first production deployment. Pre-creating known partitions makes
-    # the schema self-documenting about the expected data range.
+    # 12 monthly partitions pre-created for 2024 because scenario fixtures use
+    # 2024-01-01 as simulation start. Without them, inserts land in DEFAULT —
+    # functionally acceptable but hides missing-partition bugs until production.
     months_2024 = [
         ("2024_01", "2024-01-01", "2024-02-01"),
         ("2024_02", "2024-02-01", "2024-03-01"),
@@ -68,26 +62,24 @@ def upgrade() -> None:
             FOR VALUES FROM ('{start}') TO ('{end}')
         """)
 
-    # DEFAULT partition catches any event_time outside the 2024 monthly range.
-    # I'm including this from day one rather than waiting for an out-of-range insert
-    # to fail — failing inserts on partition misses would surface as data loss in the
-    # ingestion worker, which is much harder to diagnose than a partition count mismatch.
+    # DEFAULT partition catches event_time values outside the 2024 monthly range.
+    # Created from day one: failing inserts on partition misses surface as ingestion
+    # data loss, which is harder to diagnose than a partition count mismatch.
     op.execute("""
         CREATE TABLE pipeline_metrics_default
         PARTITION OF pipeline_metrics DEFAULT
     """)
 
-    # Per-stage time-range scans are the dominant query pattern for the detection layer
-    # (sliding window aggregator fetches the last N seconds of metrics for a given stage).
-    # A (stage_id, event_time) index on the parent table is automatically propagated
-    # to each child partition by PostgreSQL's partitioned index infrastructure.
+    # (stage_id, event_time) index on the parent table: the sliding window aggregator's
+    # dominant query is a per-stage time-range scan. PostgreSQL propagates partitioned
+    # indexes to child partitions automatically.
     op.execute("""
         CREATE INDEX ix_pipeline_metrics_stage_event
         ON pipeline_metrics (stage_id, event_time)
     """)
 
-    # Sparse index on fault_label to support quick ground-truth recall queries in the
-    # detection benchmark without paying index maintenance overhead on the majority of
+    # Sparse partial index on fault_label: supports ground-truth recall queries in
+    # the detection benchmark without index maintenance overhead on the majority of
     # rows where fault_label IS NULL.
     op.execute("""
         CREATE INDEX ix_pipeline_metrics_fault_label
@@ -95,10 +87,9 @@ def upgrade() -> None:
         WHERE fault_label IS NOT NULL
     """)
 
-    # Stub tables for AnomalyEvent and FaultLocalization — created now so that future
-    # phases can add columns via ALTER TABLE rather than CREATE TABLE, preserving a
-    # clean migration history. I'm using op.create_table() here because these are
-    # ordinary heap tables with no partitioning requirements.
+    # Stub tables created now so future phases add columns via ALTER TABLE rather than
+    # CREATE TABLE, preserving a clean migration history. op.create_table() is safe
+    # here — these are ordinary heap tables with no partitioning requirements.
     op.create_table(
         "anomaly_events",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -121,15 +112,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # I'm dropping indexes before tables to avoid the brief period where the index
-    # exists on a non-existent table, which would cause a schema validation error if
-    # alembic inspect runs between the DROP TABLE and DROP INDEX calls.
+    # Indexes dropped before tables: avoids a window where the index exists on a
+    # non-existent table, which would cause a schema validation error if alembic
+    # inspect runs between DROP TABLE and DROP INDEX.
     op.drop_index("ix_fault_localizations_stage_id", table_name="fault_localizations")
     op.drop_table("fault_localizations")
 
     op.drop_index("ix_anomaly_events_stage_id", table_name="anomaly_events")
     op.drop_table("anomaly_events")
 
-    # Dropping the parent table cascades to all child partitions and partition-local
-    # indexes automatically — no need to drop each monthly partition individually.
+    # DROP ... CASCADE on the parent cascades to all child partitions and their
+    # partition-local indexes automatically.
     op.execute("DROP TABLE IF EXISTS pipeline_metrics CASCADE")

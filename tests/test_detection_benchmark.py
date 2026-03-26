@@ -1,11 +1,10 @@
 """
 Detection accuracy benchmark for CUSUM and EWMA detectors.
 
-I'm running this as a pytest module rather than a standalone script so it
-integrates with CI naturally — the same command that runs unit tests also
-gates on detection quality. The trade-off is slightly slower test collection
-for the unit test suite; I'm accepting it because the benchmark runs in under
-2 seconds and does not require containers.
+Runs as a pytest module rather than a standalone script so CI gates on
+detection quality alongside unit tests. The trade-off is slightly slower
+test collection; acceptable because the benchmark runs in under 2 seconds
+and requires no containers.
 
 The benchmark exercises all six fault types from Milestone 3 with known
 magnitudes, then asserts recall ≥ 0.90 and FPR ≤ 0.05 for each combination
@@ -25,21 +24,18 @@ from simulator.fault_injection import FAULT_TYPES
 DOCS_DIR = Path(__file__).parent.parent / "docs"
 REPORT_PATH = DOCS_DIR / "detection_benchmark.md"
 
-# I'm using the default BenchmarkConfig here rather than parameterising the
-# test, because the goal is asserting a fixed quality bar, not exploring the
-# sensitivity surface. If the defaults ever need changing (e.g. fault magnitude
-# proves too easy or too hard to detect), the config change is the breaking
-# signal that prompts a code review.
+# Default BenchmarkConfig rather than parameterised — the goal is asserting a
+# fixed quality bar, not exploring the sensitivity surface. A config change is
+# the breaking signal that prompts a code review.
 _BENCHMARK_CONFIG = BenchmarkConfig()
 
 
 @pytest.fixture(scope="module")
 def benchmark_report():
     """
-    I'm running the benchmark once per module and sharing the report across
-    all tests to avoid re-running 3,000 events six times. Module scope is
-    correct here because the benchmark is stateless — the same config always
-    produces the same report.
+    Runs the benchmark once per module and shares the report to avoid
+    re-running 3,000 events six times. Module scope is correct because the
+    benchmark is stateless — the same config always produces the same report.
     """
     bench = DetectorBenchmark(_BENCHMARK_CONFIG)
     report = bench.run()
@@ -55,10 +51,9 @@ class TestBenchmarkThresholds:
     @pytest.mark.parametrize("fault_type", FAULT_TYPES)
     def test_cusum_recall(self, benchmark_report, fault_type: str) -> None:
         """
-        I'm asserting CUSUM recall per fault type rather than a single aggregate
-        because an aggregate ≥ 0.90 could mask a complete miss on one fault type
-        (e.g. recall=1.0 on 5 types, 0.40 on one → aggregate=0.93 but the sixth
-        type is broken). Per-type assertions catch exactly that failure mode.
+        Per-fault-type assertion rather than a single aggregate — an aggregate
+        ≥ 0.90 could mask a complete miss on one type (recall=1.0 on 5 types,
+        0.40 on one → aggregate=0.93). Per-type assertions catch that failure.
         """
         result = next(
             r for r in benchmark_report.results
@@ -86,9 +81,8 @@ class TestBenchmarkThresholds:
     @pytest.mark.parametrize("fault_type", FAULT_TYPES)
     def test_cusum_false_positive_rate(self, benchmark_report, fault_type: str) -> None:
         """
-        I'm asserting FPR separately from recall because they capture different
-        failure modes. A detector tuned to always fire (recall=1.0) trivially
-        passes the recall test but fails FPR. Both gates must hold independently.
+        FPR is asserted separately from recall — a detector tuned to always fire
+        passes recall trivially but fails FPR. Both gates must hold independently.
         """
         result = next(
             r for r in benchmark_report.results
@@ -115,10 +109,8 @@ class TestBenchmarkThresholds:
 
     def test_report_written_to_docs(self, benchmark_report) -> None:
         """
-        I'm asserting the report file exists as a smoke test that the side
-        effect ran. A missing report file means CI would report passing tests
-        but no audit record — operators would have no inspectable output from
-        the benchmark job.
+        Smoke test that the side effect ran — a missing report means CI passes
+        but operators have no inspectable output from the benchmark job.
         """
         assert REPORT_PATH.exists(), f"Benchmark report not written to {REPORT_PATH}"
         content = REPORT_PATH.read_text(encoding="utf-8")

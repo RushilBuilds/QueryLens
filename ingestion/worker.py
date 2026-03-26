@@ -20,10 +20,9 @@ _log = structlog.get_logger(__name__)
 @dataclass(frozen=True)
 class WorkerConfig:
     """
-    I'm separating WorkerConfig from ConsumerConfig because the batch and
-    flush parameters belong to the writer, not the broker client. Merging them
-    would make it impossible to test the worker's flush logic with a mock
-    consumer without also constructing valid broker config.
+    Batch and flush parameters belong to the writer, not the broker client.
+    Keeping them separate allows the worker's flush logic to be tested with a
+    mock consumer without constructing valid broker config.
     """
 
     db_url: str
@@ -39,26 +38,19 @@ class WorkerConfig:
 
 class IngestionWorker:
     """
-    I'm using a dual-trigger flush (batch_size OR flush_interval_s, whichever
-    fires first) because either trigger alone has a failure mode. batch_size
-    alone means a quiet topic with 499 events sitting in the buffer never
-    flushes until the 500th arrives — adding arbitrary latency visible to the
-    detection layer. flush_interval_s alone means a burst of 50,000 events
-    holds the offset commit hostage until the timer fires, growing the replay
-    window on crash. The dual trigger bounds both latency and replay volume.
+    Dual-trigger flush (batch_size OR flush_interval_s). batch_size alone
+    would stall a quiet topic indefinitely; flush_interval_s alone lets bursts
+    grow the crash-replay window unboundedly. The dual trigger bounds both
+    detection latency and replay volume.
 
-    I'm using a synchronous SQLAlchemy Session rather than asyncpg because the
-    IngestionWorker runs in a single-threaded loop where the bottleneck is
-    broker poll latency, not DB write latency. Adding asyncio machinery would
-    complicate the offset commit sequencing (must commit after write confirms)
-    without measurable throughput gain at our event rate.
+    Synchronous SQLAlchemy Session rather than asyncpg: the bottleneck is
+    broker poll latency, not DB write latency. Async machinery would complicate
+    offset commit sequencing without measurable throughput gain at this rate.
 
-    The write → commit ordering is strict: we INSERT the batch into PostgreSQL
-    and only then call consumer.commit_batch(). A crash between write and
-    commit replays the batch from the last committed offset, producing
-    duplicate writes that PostgreSQL's GENERATED ALWAYS AS IDENTITY absorbs
-    by assigning new IDs. A crash between commit and write would lose the
-    batch permanently — that ordering is forbidden.
+    Write → commit ordering is strict: INSERT to PostgreSQL first, then
+    commit_batch(). A crash between write and commit replays the batch from
+    the last committed offset (tolerable duplicates). A crash between commit
+    and write would lose the batch permanently.
     """
 
     def __init__(
@@ -83,11 +75,9 @@ class IngestionWorker:
 
     def _flush(self) -> None:
         """
-        I'm counting DLQ records here (not in poll_batch) so the worker's
-        metrics reflect what was actually processed in each flush cycle, not
-        what was routed to DLQ during polling. This distinction matters when
-        DLQ routing and DB writes happen in different code paths — having one
-        counter source of truth avoids double-counting.
+        DLQ records counted here (not in poll_batch) so metrics reflect what
+        was processed per flush cycle. One counter source of truth avoids
+        double-counting when DLQ routing and DB writes happen in different paths.
         """
         if not self._pending:
             return
@@ -95,10 +85,9 @@ class IngestionWorker:
         valid = [m for m in self._pending if m.is_valid]
         invalid_count = len(self._pending) - len(valid)
 
-        # I'm computing per-stage counts before the DB write so the Prometheus
-        # labels are available even if the write raises. RECORDS_CONSUMED reflects
-        # what was parsed off the wire; RECORDS_WRITTEN reflects what landed in
-        # PostgreSQL. The delta between them is the transient write failure rate.
+        # Per-stage counts computed before the DB write so Prometheus labels are
+        # available even if the write raises. RECORDS_CONSUMED = parsed off the wire;
+        # RECORDS_WRITTEN = landed in PostgreSQL. Delta = transient write failure rate.
         stage_counts = _StageCounter(
             m.event.stage_id for m in valid if m.event is not None
         )
@@ -132,20 +121,15 @@ class IngestionWorker:
 
     def _write_to_db(self, messages: List[ConsumedMessage]) -> None:
         """
-        I'm using a bulk INSERT via Session.add_all() rather than individual
-        INSERT statements because the SQLAlchemy unit-of-work pattern batches
-        all pending inserts into a single executemany() call at flush time.
-        For 500 records this is roughly 50x faster than 500 individual INSERTs
-        because it eliminates per-row round-trip latency.
+        Bulk INSERT via Session.add_all() — SQLAlchemy batches all pending
+        inserts into a single executemany() call, ~50x faster than 500
+        individual INSERTs for a 500-record batch.
 
-        I'm not using INSERT ... ON CONFLICT DO NOTHING here even though
-        replayed messages would produce duplicate rows (different id due to
-        GENERATED ALWAYS AS IDENTITY). Duplicates are tolerable in the metrics
-        table because the detection layer uses aggregates (mean latency, p99)
-        that are robust to occasional duplicate records. Adding ON CONFLICT
-        would require a natural key for deduplication that we don't have —
-        (stage_id, event_time) is not unique since multiple events can share
-        the same second.
+        No ON CONFLICT DO NOTHING: replayed messages produce duplicate rows
+        with new IDs (GENERATED ALWAYS AS IDENTITY), which is tolerable because
+        the detection layer uses aggregates (mean latency, p99) that are robust
+        to occasional duplicates. A natural deduplication key doesn't exist —
+        (stage_id, event_time) is not unique within the same second.
         """
         orm_rows = [
             PipelineMetric(
@@ -171,14 +155,9 @@ class IngestionWorker:
 
     def run_once(self) -> int:
         """
-        I'm exposing run_once() as the public step method rather than a
-        blocking run() loop so that tests can drive the worker tick-by-tick
-        without threads or async. A blocking run() would require the test to
-        call it in a thread and coordinate shutdown — run_once() makes the
-        control flow synchronous and deterministic in tests.
-
-        Returns the number of records written to the DB in this call (0 if
-        the batch was not yet ready to flush).
+        Single-step public API instead of a blocking run() loop, so tests drive
+        the worker tick-by-tick without threads or async coordination.
+        Returns records written in this call (0 if batch not yet ready to flush).
         """
         batch = self._consumer.poll_batch(
             max_records=self._config.batch_size,
@@ -216,11 +195,9 @@ def _oldest_event_time_per_stage(
     messages: List[ConsumedMessage],
 ) -> dict:
     """
-    I'm computing the oldest event_time per stage rather than a single global
-    oldest time because CONSUMER_LAG is a per-stage gauge. A single slow stage
-    dragging down a global gauge would mask that the other stages are current —
-    the per-stage breakdown lets the Prometheus alert rule target the specific
-    stage that is lagging, not fire a blanket alarm.
+    Oldest event_time computed per stage rather than globally because
+    CONSUMER_LAG is a per-stage gauge. A global gauge would mask a single slow
+    stage and prevent alert rules from targeting the specific lagging stage.
     """
     oldest: dict = {}
     for m in messages:

@@ -12,19 +12,18 @@ from simulator.models import PipelineEvent
 @dataclass(frozen=True)
 class EWMAConfig:
     """
-    I'm parameterising the EWMA detector with two values rather than one
-    because smoothing (λ) and control limit width (L) control completely
-    different things: λ governs how fast the statistic reacts to new data
-    and L governs how far it must move before we call it an anomaly.
-    Merging them into a single 'sensitivity' knob would make it impossible
-    to independently tune false-positive rate and detection lag.
+    Two separate parameters rather than a single 'sensitivity' knob because
+    smoothing (λ) and control limit width (L) control independent things:
+    λ governs reaction speed; L governs the anomaly threshold. Merging them
+    makes it impossible to independently tune false-positive rate and detection
+    lag.
 
     Trade-offs:
-    - High λ (→ 1.0): EWMA collapses to a per-event z-score — maximum
-      reactivity, minimum smoothing. Good for sudden spike detection.
-    - Low λ (→ 0.0): heavy smoothing; impulses are attenuated but sustained
-      shifts accumulate. At the limit this approaches CUSUM behaviour.
-    - L = 3.0 is the standard Shewhart 3σ boundary; lowering L increases
+    - High λ (→ 1.0): collapses to a per-event z-score — maximum reactivity,
+      minimum smoothing. Good for sudden spike detection.
+    - Low λ (→ 0.0): heavy smoothing; impulses attenuated but sustained shifts
+      accumulate, approaching CUSUM behaviour at the limit.
+    - L = 3.0 is the standard Shewhart 3σ boundary; lower L increases
       sensitivity at the cost of more false positives.
 
     Recommended starting point for pipeline latency:
@@ -48,12 +47,10 @@ class EWMAConfig:
 
 class EWMADetector:
     """
-    I'm applying the Lucas & Saccucci (1990) EWMA control chart to seasonal
-    z-scores rather than raw metric values. Using z-scores means the control
-    limit width L has a consistent interpretation across all metrics and stages:
-    L=3 always means "3 EWMA standard deviations from the seasonal expected
-    value," regardless of whether the underlying metric is latency_ms or
-    row_count.
+    Applies the Lucas & Saccucci (1990) EWMA control chart to seasonal z-scores
+    rather than raw metric values. Z-score input means L has a consistent
+    interpretation across all metrics: L=3 always means "3 EWMA standard
+    deviations from seasonal expected value" for both latency_ms and row_count.
 
     Update formula (applied to z-score input):
         Z_t = λ * z_t + (1 - λ) * Z_{t-1},   Z_0 = 0
@@ -62,25 +59,18 @@ class EWMADetector:
         σ²_t = (λ / (2 - λ)) * [1 - (1 - λ)^(2t)]
         UCL_t = L * σ_t,   LCL_t = -L * σ_t
 
-    The key property of the exact-variance formula is that at t=1:
-        σ_1 = λ  (algebraically exact)
-        Z_1 = λ * z_1
-        fires iff |Z_1| > L * λ, i.e. |z_1| > L
+    At t=1: σ_1 = λ (algebraically exact), so a single event with |z| > L fires
+    immediately — EWMA is equivalent to a z-score alarm at step 1, then smooths
+    transients as t grows without the startup false-positive rate of a fixed-limit
+    chart.
 
-    This means a single event with |z| > L fires immediately — EWMA is
-    equivalent to a z-score alarm at step 1, but then smooths out transients
-    as t grows, providing impulse detection without the startup false-positive
-    rate of a fixed-limit chart.
+    CUSUM fires on sustained drift; EWMA reacts within one tick to a sharp spike
+    but will not fire on a gradual ramp whose per-event z scores are all below L.
+    Running both in parallel covers the full fault taxonomy.
 
-    CUSUM accumulates z scores over time and fires on sustained drift; EWMA
-    reacts within one tick to a sharp spike but will not fire on a gradual
-    ramp whose per-event z scores are all below L. Running both in parallel
-    covers the full fault taxonomy.
-
-    I'm resetting Z to 0 after a fire (keeping step count n intact) so the
-    detector re-arms from centre but retains its mature control limits. Resetting
-    n too would collapse the limits back to the tight startup values, which
-    could cause spurious fires during the re-arm period.
+    Z is reset to 0 after a fire (n intact) so the detector re-arms from centre
+    but retains mature control limits. Resetting n too would collapse limits back
+    to tight startup values, causing spurious fires during the re-arm period.
     """
 
     def __init__(
@@ -96,9 +86,8 @@ class EWMADetector:
 
     def update(self, event: PipelineEvent) -> List[AnomalyEvent]:
         """
-        I'm processing all configured metrics per update() call for the same
-        reason as CUSUMDetector: the caller loop sees one PipelineEvent at a
-        time and should not need to track metric ownership per detector instance.
+        Processes all configured metrics per call so the caller loop doesn't
+        track metric ownership per detector instance.
 
         Returns a list of AnomalyEvents — empty under normal conditions.
         A single event can fire at most one AnomalyEvent per metric (upper or
@@ -116,11 +105,10 @@ class EWMADetector:
                 metric=metric,
                 value=value,
             )
-            # I'm skipping updates with no baseline for the same reason as
-            # CUSUMDetector — accumulating z=None as 0 would produce a
-            # misleading EWMA trace that drifts toward 0 rather than staying
-            # at its last valid value, causing spurious lower-signal fires
-            # after a baseline refresh.
+            # Skip when no baseline — accumulating z=None as 0 would produce a
+            # misleading EWMA trace that drifts toward 0 rather than staying at
+            # its last valid value, causing spurious lower-signal fires after a
+            # baseline refresh.
             if z is None:
                 continue
 
@@ -180,11 +168,10 @@ class EWMADetector:
 
     def reset(self, stage_id: str, metric: str) -> None:
         """
-        I'm providing an explicit reset so the healing layer can fully clear
-        a detector's state after a confirmed fault is remediated — same
-        contract as CUSUMDetector.reset(). Unlike the post-fire reset (which
-        keeps n intact), this also resets n so the control limits restart from
-        their tight startup values on the next event.
+        Explicit reset for the healing layer to clear state after a confirmed
+        fault is remediated — same contract as CUSUMDetector.reset(). Unlike
+        the post-fire reset (which keeps n), this also resets n so control
+        limits restart from tight startup values on the next event.
         """
         self._state.pop((stage_id, metric), None)
 

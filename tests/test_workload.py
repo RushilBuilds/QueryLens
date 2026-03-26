@@ -7,11 +7,10 @@ from simulator.workload import PoissonEventGenerator, WorkloadProfile
 
 def test_inter_arrival_rate_converges_to_lambda() -> None:
     """
-    I'm testing at n=10,000 because the relative error of an exponential sample mean
-    scales as 1/sqrt(n). At n=10k that's ~1% relative standard deviation, so a 5%
-    tolerance gives roughly 5 sigma of headroom before a correct implementation fails
-    on a bad seed. Fewer samples would make this test flaky; more would slow the suite
-    without meaningfully tightening the bound.
+    n=10,000: relative error of an exponential sample mean scales as 1/sqrt(n),
+    giving ~1% relative std at this count. A 5% tolerance is roughly 5 sigma of
+    headroom. Fewer samples risk flakiness; more slow the suite with no meaningful
+    tightening.
     """
     arrival_rate = 5.0  # events per second
     profile = WorkloadProfile(
@@ -48,17 +47,14 @@ def test_inter_arrival_rate_converges_to_lambda() -> None:
 
 def test_payload_sizes_follow_lognormal_distribution() -> None:
     """
-    I'm checking first and second moments rather than running a KS test against the
-    theoretical CDF because the KS test requires knowing the exact log-normal mu/sigma,
-    which means inverting the moment-matching equations I used in the generator — that
-    would be testing the math against itself, not the implementation. Checking that the
-    observed mean and std land within 10% of the configured values catches the parameter
-    conversion bugs that actually occur in practice, like swapping mu and sigma or
-    computing log-space variance incorrectly.
+    First and second moments checked rather than a KS test: the KS test requires the
+    exact log-normal mu/sigma, which means inverting the generator's moment-matching
+    equations — testing the math against itself, not the implementation. Observed mean
+    and std within 10% of configured values catches the parameter conversion bugs that
+    occur in practice (swapped mu/sigma, incorrect log-space variance).
 
-    Integer truncation of payload_bytes introduces a small negative bias in both mean
-    and std. At mean=4096 bytes the truncation error is O(0.5 bytes), which is ~0.01%
-    — well within the 10% tolerance.
+    Integer truncation of payload_bytes introduces ~0.01% negative bias at mean=4096 —
+    well within the 10% tolerance.
     """
     payload_mean = 4096.0  # bytes
     payload_std = 1024.0   # bytes

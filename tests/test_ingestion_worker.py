@@ -1,17 +1,15 @@
 """
 Integration test for MetricConsumer and IngestionWorker.
 
-I'm running this against real Kafka (KRaft) and real PostgreSQL containers
-rather than mocking either because the correctness guarantee we care about is
-end-to-end: a message produced to the topic must land in PostgreSQL unless it
-is malformed, in which case it must land in the DLQ topic. Mocking the consumer
-or the DB session would verify the glue code but not the delivery contract.
+Run against real Kafka (KRaft) and real PostgreSQL containers rather than mocks:
+the guarantee being verified is end-to-end delivery — valid messages land in
+PostgreSQL, malformed messages land in the DLQ. Mocking either layer would
+verify glue code but not the delivery contract.
 
-The DLQ test specifically exercises the at-least-once guarantee: a batch that
-contains one malformed record must not cause the valid records in that batch
-to be silently dropped. This is the failure mode that unit tests cannot catch
-because it depends on the interaction between offset commit ordering and DB
-write ordering.
+The DLQ test exercises the at-least-once guarantee: a batch with one malformed
+record must not silently drop the valid records. This failure mode depends on the
+interaction between offset commit ordering and DB write ordering — unit tests
+cannot catch it.
 """
 from __future__ import annotations
 
@@ -39,11 +37,10 @@ from simulator.models import PipelineEvent
 KAFKA_IMAGE = "confluentinc/cp-kafka:7.6.0"
 POSTGRES_IMAGE = "postgres:16-alpine"
 ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
-# I'm using class-specific topic names rather than a shared SOURCE_TOPIC
-# because module-scoped infra means the Kafka broker is shared across all
-# test classes. A shared topic causes the DLQ test consumer (which uses
-# auto.offset.reset=earliest) to read the happy-path test's 50 messages
-# before reaching the 11 DLQ-test messages, producing a wrong total count.
+# Class-specific topic names rather than a shared SOURCE_TOPIC: the broker is
+# shared across test classes (module-scoped infra). A shared topic would cause
+# the DLQ test consumer (auto.offset.reset=earliest) to read the happy-path's
+# 50 messages before the 11 DLQ-test messages, producing a wrong total count.
 TOPIC_HAPPY = "test.metrics.happy"
 TOPIC_DLQ_INPUT = "test.metrics.dlq-input"
 DLQ_SUFFIX = ".dlq"
@@ -83,15 +80,11 @@ def _produce_messages(bootstrap: str, topic: str, payloads: List[bytes]) -> None
 
 def _consume_all_from_dlq(bootstrap: str, dlq_topic: str, expected_count: int) -> List[dict]:
     """
-    I'm reading from offset 0 on all partitions rather than joining a consumer
-    group so the read is reproducible even if the test is re-run without
-    restarting the broker. Consumer group offsets would advance on first read
-    and miss messages on subsequent runs.
+    Reads from offset 0 on all partitions rather than joining a consumer group,
+    so the read is reproducible across test re-runs without restarting the broker.
 
-    I'm retrying list_topics up to 5 times because the DLQ topic is
-    auto-created by the producer's first write and may not be visible to the
-    metadata API immediately. Without a retry, list_topics returns 0 partitions
-    and the assign() call leaves the consumer with nothing to read.
+    list_topics retried up to 10 times: the DLQ topic is auto-created on first
+    write and may not be visible to the metadata API immediately.
     """
     consumer = KafkaConsumer({
         "bootstrap.servers": bootstrap,
@@ -139,11 +132,9 @@ def _consume_all_from_dlq(bootstrap: str, dlq_topic: str, expected_count: int) -
 @pytest.fixture(scope="module")
 def infra():
     """
-    I'm starting both containers in a single fixture and yielding a dict of
-    connection strings so that the setup cost (two container starts + migration)
-    is paid once for the whole module. The alternative — separate fixtures for
-    kafka and postgres — would require careful fixture ordering and would make
-    the test teardown order non-obvious.
+    Both containers started in a single fixture so setup cost (two starts +
+    migration) is paid once per module. Separate fixtures would require careful
+    ordering and make teardown order non-obvious.
     """
     with KafkaContainer(KAFKA_IMAGE).with_kraft() as kafka, \
          PostgresContainer(POSTGRES_IMAGE) as pg:
@@ -182,11 +173,9 @@ class TestWorkerConfig:
 
 class TestIngestionWorkerHappyPath:
     """
-    I'm testing with 50 events rather than a larger number because the
-    correctness property we're verifying (all events written, offsets
-    committed) doesn't require volume — it requires coverage of the
-    write → commit ordering. Volume tests belong in load benchmarks, not
-    correctness tests.
+    50 events is sufficient: the correctness property (all events written,
+    offsets committed) requires coverage of write → commit ordering, not
+    volume. Volume tests belong in load benchmarks.
     """
 
     N_EVENTS = 50
@@ -241,13 +230,9 @@ class TestIngestionWorkerHappyPath:
 
     def test_offset_advances_after_write(self, infra: dict) -> None:
         """
-        I'm verifying offset advancement by starting a second consumer on the
-        same group_id after the worker closes. If offsets were committed, the
-        new consumer should see no messages (they were already consumed). If
-        offsets were NOT committed, the new consumer would re-read everything.
-
-        I'm using a 2-second poll window rather than a longer timeout because
-        the topic is drained — any messages left would appear immediately.
+        A second consumer on the same group_id after the worker closes must see
+        no messages if offsets were committed. A 2-second poll window is enough —
+        the topic is drained and any remaining messages would appear immediately.
         """
         bootstrap = infra["kafka_bootstrap"]
 
@@ -275,10 +260,9 @@ class TestIngestionWorkerHappyPath:
 
 class TestDLQRouting:
     """
-    I'm placing the DLQ test in a separate class with its own group_id so it
-    doesn't share offset state with the happy-path test. Shared group state
-    would mean the DLQ test consumer starts from where the happy-path consumer
-    left off, skipping the valid records we specifically produce here.
+    Separate class with its own group_id to avoid sharing offset state with the
+    happy-path test. Shared group state would skip the valid records produced
+    here by starting from where the happy-path consumer left off.
     """
 
     N_VALID = 10
@@ -334,10 +318,9 @@ class TestDLQRouting:
 
     def test_dlq_message_contains_error_context(self, infra: dict) -> None:
         """
-        I'm reading the DLQ after the routing test has run. The DLQ contains
-        the envelope written by MetricConsumer._send_to_dlq — I'm asserting
-        the key fields rather than the full envelope so that minor envelope
-        format changes don't require updating this test.
+        Reads the DLQ after the routing test has run. Key fields only are
+        asserted rather than the full envelope — minor format changes should
+        not require updating this test.
         """
         bootstrap = infra["kafka_bootstrap"]
         dlq_messages = _consume_all_from_dlq(

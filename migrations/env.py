@@ -6,11 +6,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# I'm importing Base from ingestion.models so Alembic's autogenerate diff has
-# access to the full target metadata. Without this import, `alembic revision
-# --autogenerate` would always produce empty migrations because it would compare
-# the database schema against an empty MetaData object rather than the declared
-# models. Every new model module added in later phases must be imported here too.
+# Base imported from ingestion.models so Alembic's autogenerate diff has access
+# to the full target metadata. Without this, --autogenerate always produces empty
+# migrations (compares against an empty MetaData). Every new model module must be
+# imported here too.
 from ingestion.models import Base
 
 config = context.config
@@ -23,20 +22,18 @@ target_metadata = Base.metadata
 
 def _db_url() -> str:
     """
-    I'm prioritising DATABASE_URL from the environment over the value in alembic.ini
-    so that CI, Docker Compose, and testcontainers-based tests can all inject their
-    own connection strings without editing the ini file. The ini value serves as a
-    documented default for local development only — it is never read in production or
-    during automated tests.
+    DATABASE_URL from the environment takes priority over alembic.ini so CI,
+    Docker Compose, and testcontainers can inject connection strings without
+    editing the ini. The ini value is a local-development default only.
     """
     return os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
 
 
 def run_migrations_offline() -> None:
     """
-    I'm keeping offline mode so that the migration can be rendered to SQL and
-    reviewed in code review without needing a running database. Useful when the
-    DBA wants to inspect the DDL before it touches a shared environment.
+    Offline mode renders the migration to SQL for code review without a running
+    database, useful when a DBA needs to inspect DDL before it touches a shared
+    environment.
     """
     url = _db_url()
     context.configure(
