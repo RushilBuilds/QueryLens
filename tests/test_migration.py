@@ -21,7 +21,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
 
-from ingestion.models import AnomalyEvent, FaultLocalization, PipelineMetric
+from ingestion.models import AnomalyEventRow, FaultLocalizationRow, PipelineMetric
 
 ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
 

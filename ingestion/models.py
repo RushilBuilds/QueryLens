@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlalchemy import BigInteger, DateTime, Float, Integer, SmallInteger, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -91,18 +92,23 @@ class StageBaseline(Base):
     fitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FaultLocalization(Base):
+class FaultLocalizationRow(Base):
     """
-    Stub table — columns (root_cause_stage_id, confidence_score, causal_path,
-    algorithm_version) depend on the Bayesian localization API finalized in
-    Milestone 13. Committing to column names early would create a migration
-    diff the moment the causal engine interface changes.
+    Named FaultLocalizationRow to avoid shadowing the LocalizationResult dataclass
+    in causal.localization. Full schema replaces the M1 stub: hypothesis_id is the
+    join key used by the HealingAuditLog; ranked_candidates_json and evidence_json
+    are TEXT rather than JSONB to keep the model portable to SQLite in unit tests.
     """
 
     __tablename__ = "fault_localizations"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    stage_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    hypothesis_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    root_cause_stage_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    posterior_probability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    ranked_candidates_json: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    evidence_json: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    evidence_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    true_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
