@@ -112,3 +112,26 @@ class FaultLocalizationRow(Base):
     evidence_count: Mapped[int] = mapped_column(Integer, nullable=False)
     true_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CircuitBreakerStateRow(Base):
+    """
+    Persists CircuitBreaker FSM state per stage so registry restarts do not reset
+    trip_count — losing trip history would collapse the exponential backoff schedule
+    back to base_backoff_s, letting a flapping stage flood downstream consumers again.
+
+    opened_at is NULL when state=closed; the registry uses this to reconstruct the
+    exact opened_at on reload rather than treating NULL as time.now().
+    """
+
+    __tablename__ = "circuit_breaker_states"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stage_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    trip_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
