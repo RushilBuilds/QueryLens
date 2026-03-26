@@ -1,0 +1,83 @@
+# Default healing policy rules for QueryLens.
+#
+# Rules are evaluated in ascending priority order — lower priority value wins.
+# All fields except action and priority are optional wildcards (omit = match any).
+#
+# fault_type values match the FaultSpec.fault_type strings from the simulator:
+#   latency_spike | dropped_connection | schema_drift
+#   partition_skew | throughput_collapse | error_burst
+#
+# severity is derived from the top candidate's posterior_probability:
+#   high   >= 0.70
+#   medium >= 0.40
+#   low     < 0.40
+#
+# stage_type: source | transform | sink
+
+rules:
+
+  # --- High-confidence source faults: circuit-break immediately to stop propagation ---
+
+  - priority: 10
+    fault_type: latency_spike
+    severity: high
+    stage_type: source
+    action: circuit_break
+    description: "High-confidence latency spike at source — circuit break to stop downstream backpressure"
+
+  - priority: 10
+    fault_type: dropped_connection
+    severity: high
+    action: circuit_break
+    description: "High-confidence dropped connection — circuit break until connectivity restored"
+
+  - priority: 10
+    fault_type: error_burst
+    severity: high
+    action: circuit_break
+    description: "High-confidence error burst — circuit break to prevent downstream error flood"
+
+  # --- Throughput faults: scale the consumer rather than blocking the stage ---
+
+  - priority: 20
+    fault_type: throughput_collapse
+    action: scale_consumer
+    description: "Throughput collapse — scale consumer replicas to restore processing rate"
+
+  - priority: 20
+    fault_type: partition_skew
+    action: reroute_traffic
+    description: "Partition skew — reroute traffic to rebalance partition load"
+
+  # --- Lower-severity latency and error faults: rate-limit before circuit-breaking ---
+
+  - priority: 30
+    fault_type: latency_spike
+    action: rate_limit
+    description: "Latency spike (non-high) — rate limit to reduce load without full isolation"
+
+  - priority: 30
+    fault_type: error_burst
+    action: rate_limit
+    description: "Error burst (non-high) — rate limit to slow error propagation"
+
+  # --- Schema drift: always page — automated remediation risks data corruption ---
+
+  - priority: 40
+    fault_type: schema_drift
+    action: page_operator
+    description: "Schema drift — automated action is unsafe; operator must assess compatibility"
+
+  # --- Transform stage faults where replay is safe ---
+
+  - priority: 50
+    fault_type: dropped_connection
+    stage_type: transform
+    action: replay_range
+    description: "Dropped connection on transform — replay the dropped offset range after reconnect"
+
+  # --- Catch-all fallback: page the operator for anything unmatched ---
+
+  - priority: 999
+    action: page_operator
+    description: "No specific rule matched — escalate to operator"
