@@ -38,6 +38,7 @@ class PipelineMetric(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     fault_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    replayed: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
 
 
 class AnomalyEventRow(Base):
