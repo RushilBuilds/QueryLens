@@ -115,6 +115,35 @@ class FaultLocalizationRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class HealingActionRow(Base):
+    """
+    Audit record for each automated healing action dispatched by HealingPolicyEngine.
+    outcome starts as 'pending' and transitions to success/failed/cancelled via
+    HealingAuditLog — storing it as VARCHAR keeps the schema portable to SQLite
+    without a Postgres ENUM cast shim in tests.
+
+    resolved_at is NULL until the outcome is finalised; the gap between
+    triggered_at and resolved_at is the end-to-end healing latency.
+    """
+
+    __tablename__ = "healing_actions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    hypothesis_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    stage_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    fault_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+
+
 class CircuitBreakerStateRow(Base):
     """
     Persists CircuitBreaker FSM state per stage so registry restarts do not reset
