@@ -63,9 +63,9 @@ class CausalDAG:
         # Dijkstra with propagation_delay_ms weight selects the minimum-delay path —
         # the path along which a fault would first manifest as a symptom.
         try:
-            delays = nx.single_target_shortest_path_length(
+            delays = dict(nx.single_target_shortest_path_length(
                 self._graph, stage_id
-            )
+            ))
         except nx.NetworkXError:
             delays = {}
 
