@@ -193,10 +193,10 @@ Goal: given a set of co-occurring anomalies and the causal graph, output a ranke
 
 Goal: a single fault in a 10-stage pipeline shouldn't generate 10 alerts — the correlator collapses symptom events into one actionable signal.
 
-- [ ] Implement `AlertCorrelator` — sliding deduplication window; groups `AnomalyEvent` objects by overlapping time range and causal ancestor set
-- [ ] Add `CorrelationPolicy` — configurable window duration and minimum co-occurrence count before events are grouped
-- [ ] Ensure correlated groups are emitted as a single `CorrelatedAlert` with all constituent event IDs attached for traceability
-- [ ] Write tests: feed 10 simultaneous anomaly events from downstream stages of one root cause; assert exactly one `CorrelatedAlert` emitted
+- [x] Implement `AlertCorrelator` — sliding deduplication window; groups `AnomalyEvent` objects by overlapping time range and causal ancestor set
+- [x] Add `CorrelationPolicy` — configurable window duration and minimum co-occurrence count before events are grouped
+- [x] Ensure correlated groups are emitted as a single `CorrelatedAlert` with all constituent event IDs attached for traceability
+- [x] Write tests: feed 10 simultaneous anomaly events from downstream stages of one root cause; assert exactly one `CorrelatedAlert` emitted
 
 ---
 
@@ -204,9 +204,9 @@ Goal: a single fault in a 10-stage pipeline shouldn't generate 10 alerts — the
 
 Goal: every localization decision is written to PostgreSQL so the system can learn from its mistakes and operators can audit automated actions.
 
-- [ ] Write Alembic migration for `fault_localizations` table — columns: `id`, `hypothesis_id`, `root_cause_stage_id`, `posterior_probability`, `evidence_event_ids`, `true_label` (nullable, filled in post-hoc), `created_at`
-- [ ] Add `LocalizationRepository` — async writes `LocalizationResult` to `fault_localizations`; exposes `get_by_hypothesis_id` for the healing layer
-- [ ] Write integration test: run localization on a seeded scenario, assert persisted row matches in-memory `LocalizationResult`
+- [x] Write Alembic migration for `fault_localizations` table — columns: `id`, `hypothesis_id`, `root_cause_stage_id`, `posterior_probability`, `evidence_event_ids`, `true_label` (nullable, filled in post-hoc), `created_at`
+- [x] Add `LocalizationRepository` — async writes `LocalizationResult` to `fault_localizations`; exposes `get_by_hypothesis_id` for the healing layer
+- [x] Write integration test: run localization on a seeded scenario, assert persisted row matches in-memory `LocalizationResult`
 
 ---
 
@@ -216,9 +216,9 @@ Goal: every localization decision is written to PostgreSQL so the system can lea
 
 Goal: stop sending work to a failing stage before its failure cascades into upstream backpressure and downstream starvation.
 
-- [ ] Implement `CircuitBreaker` — three-state FSM (closed → open → half-open); trips after `failure_threshold` consecutive failures, resets on exponential backoff
-- [ ] Add `CircuitBreakerRegistry` — one breaker instance per `stage_id`; thread-safe; serializes state to PostgreSQL so restarts don't reset breaker history
-- [ ] Write unit tests: drive breaker through all state transitions, assert backoff intervals double correctly and half-open probe logic works
+- [x] Implement `CircuitBreaker` — three-state FSM (closed → open → half-open); trips after `failure_threshold` consecutive failures, resets on exponential backoff
+- [x] Add `CircuitBreakerRegistry` — one breaker instance per `stage_id`; thread-safe; serializes state to PostgreSQL so restarts don't reset breaker history
+- [x] Write unit tests: drive breaker through all state transitions, assert backoff intervals double correctly and half-open probe logic works
 
 ---
 
@@ -226,10 +226,10 @@ Goal: stop sending work to a failing stage before its failure cascades into upst
 
 Goal: given a `LocalizationResult`, select the right remediation action — the engine is the decision layer, not the executor.
 
-- [ ] Define `HealingAction` enum — `CIRCUIT_BREAK`, `RATE_LIMIT`, `REPLAY_RANGE`, `REROUTE_TRAFFIC`, `SCALE_CONSUMER`, `PAGE_OPERATOR`
-- [ ] Implement `HealingPolicyEngine` — priority-ordered rule table mapping `(fault_type, severity, stage_type)` to `HealingAction`; falls back to `PAGE_OPERATOR` when no rule matches
-- [ ] Add `PolicyConfig` — YAML-driven rule definitions so remediation logic is configurable without code changes
-- [ ] Write tests: assert correct action selected for each fault type, and that `PAGE_OPERATOR` fires when no rule matches
+- [x] Define `HealingAction` enum — `CIRCUIT_BREAK`, `RATE_LIMIT`, `REPLAY_RANGE`, `REROUTE_TRAFFIC`, `SCALE_CONSUMER`, `PAGE_OPERATOR`
+- [x] Implement `HealingPolicyEngine` — priority-ordered rule table mapping `(fault_type, severity, stage_type)` to `HealingAction`; falls back to `PAGE_OPERATOR` when no rule matches
+- [x] Add `PolicyConfig` — YAML-driven rule definitions so remediation logic is configurable without code changes
+- [x] Write tests: assert correct action selected for each fault type, and that `PAGE_OPERATOR` fires when no rule matches
 
 ---
 
@@ -237,9 +237,9 @@ Goal: given a `LocalizationResult`, select the right remediation action — the 
 
 Goal: recover from message processing failures by replaying the exact offset range from Redpanda with backpressure to avoid re-flooding a recovering stage.
 
-- [ ] Implement `ReplayOrchestrator` — seeks `MetricConsumer` to a `(topic, partition, start_offset, end_offset)` range and replays with configurable `replay_rate_limit_rps`
-- [ ] Add `ReplayRequest` dataclass — created by `HealingPolicyEngine` when `REPLAY_RANGE` is selected; includes the triggering `hypothesis_id` for audit linkage
-- [ ] Write integration test: process a batch, mark offsets as failed, trigger replay, assert all records re-land in PostgreSQL with `replayed=true` flag
+- [x] Implement `ReplayOrchestrator` — seeks `MetricConsumer` to a `(topic, partition, start_offset, end_offset)` range and replays with configurable `replay_rate_limit_rps`
+- [x] Add `ReplayRequest` dataclass — created by `HealingPolicyEngine` when `REPLAY_RANGE` is selected; includes the triggering `hypothesis_id` for audit linkage
+- [x] Write integration test: process a batch, mark offsets as failed, trigger replay, assert all records re-land in PostgreSQL with `replayed=true` flag
 
 ---
 
@@ -247,9 +247,9 @@ Goal: recover from message processing failures by replaying the exact offset ran
 
 Goal: every action the system takes autonomously must be traceable to the anomaly that triggered it, the policy that selected it, and the outcome.
 
-- [ ] Write Alembic migration for `healing_actions` table — columns: `id`, `hypothesis_id`, `localization_id`, `action_type`, `target_stage_id`, `policy_rule_matched`, `outcome` (pending / success / failed), `started_at`, `resolved_at`
-- [ ] Implement `HealingAuditLog` — writes action records on start and updates outcome on resolution; never deletes rows
-- [ ] Write integration test: trigger a full heal cycle, assert `healing_actions` row transitions from `pending` → `success` with correct timestamps
+- [x] Write Alembic migration for `healing_actions` table — columns: `id`, `hypothesis_id`, `localization_id`, `action_type`, `target_stage_id`, `policy_rule_matched`, `outcome` (pending / success / failed), `started_at`, `resolved_at`
+- [x] Implement `HealingAuditLog` — writes action records on start and updates outcome on resolution; never deletes rows
+- [x] Write integration test: trigger a full heal cycle, assert `healing_actions` row transitions from `pending` → `success` with correct timestamps
 
 ---
 
