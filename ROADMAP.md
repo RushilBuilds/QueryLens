@@ -259,11 +259,11 @@ Goal: every action the system takes autonomously must be traceable to the anomal
 
 Goal: get a running, tested API process before adding any domain routes — foundation first.
 
-- [ ] Scaffold `api/main.py` — FastAPI app with lifespan context manager for database pool and Redpanda client initialization
-- [ ] Add `api/config.py` — `Settings` class using `pydantic-settings`; reads `DATABASE_URL`, `REDPANDA_BROKERS`, `LOG_LEVEL` from environment
-- [ ] Implement `GET /health` — returns `{"status": "ok", "db": "<connected|error>", "redpanda": "<connected|error>"}` with real connectivity checks
-- [ ] Wire `structlog` and OpenTelemetry into the FastAPI middleware stack
-- [ ] Write test: assert `/health` returns 200 with real containers up and 503 with database down
+- [x] Scaffold `api/main.py` — FastAPI app with lifespan context manager for database pool and Redpanda client initialization
+- [x] Add `api/config.py` — `Settings` class using `pydantic-settings`; reads `DATABASE_URL`, `REDPANDA_BROKERS`, `LOG_LEVEL` from environment
+- [x] Implement `GET /health` — returns `{"status": "ok", "db": "<connected|error>", "redpanda": "<connected|error>"}` with real connectivity checks
+- [x] Wire `structlog` and OpenTelemetry into the FastAPI middleware stack
+- [x] Write test: assert `/health` returns 200 with real containers up and 503 with database down
 
 ---
 
