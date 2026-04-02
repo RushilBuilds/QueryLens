@@ -341,7 +341,7 @@ Goal: make automated healing actions visible and give operators a one-click esca
 
 Goal: prove the entire system works as a closed loop — one test that exercises every component from fault injection to confirmed recovery.
 
-- [ ] Write `tests/test_e2e_self_healing.py` — starts all containers, runs `SimulatorEngine` with a known `FaultSpec`, waits for detection, localization, healing action, and pipeline recovery
-- [ ] Assert: fault detected within 30 seconds of injection, root cause stage in top-2 candidates, healing action executed, pipeline metrics return to within 10% of baseline within 60 seconds
-- [ ] Parameterize over all six fault types from Milestone 3
-- [ ] Add this test as a nightly CI job separate from the unit test suite — it's slow and infrastructure-dependent
+- [x] Write `tests/test_e2e_self_healing.py` — starts all containers, runs `SimulatorEngine` with a known `FaultSpec`, waits for detection, localization, healing action, and pipeline recovery
+- [x] Assert: fault detected within 30 seconds of injection, root cause stage in top-2 candidates, healing action executed, pipeline metrics return to within 10% of baseline within 60 seconds
+- [x] Parameterize over all six fault types from Milestone 3
+- [x] Add this test as a nightly CI job separate from the unit test suite — it's slow and infrastructure-dependent
