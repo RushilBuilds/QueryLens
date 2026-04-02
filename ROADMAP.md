@@ -306,10 +306,10 @@ Goal: verify the API works end-to-end with real Redpanda and PostgreSQL before t
 
 Goal: a live page showing every stage's current status — the first thing an operator opens when something is wrong.
 
-- [ ] Scaffold `dashboard/app.py` — Streamlit app with `st.set_page_config` and auto-refresh via `streamlit-autorefresh`
-- [ ] Build `PipelineHealthView` — grid of stage cards; each card shows stage name, current status (healthy / degraded / circuit-open), p99 latency, and error rate; data pulled from `GET /stages`
-- [ ] Color-code cards by severity: green / amber / red based on deviation from seasonal baseline
-- [ ] Write a smoke test: assert the Streamlit app starts without import errors and all API calls are mocked correctly
+- [x] Scaffold `dashboard/app.py` — Streamlit app with `st.set_page_config` and auto-refresh via `streamlit-autorefresh`
+- [x] Build `PipelineHealthView` — grid of stage cards; each card shows stage name, current status (healthy / degraded / circuit-open), p99 latency, and error rate; data pulled from `GET /stages`
+- [x] Color-code cards by severity: green / amber / red based on deviation from seasonal baseline
+- [x] Write a smoke test: assert the Streamlit app starts without import errors and all API calls are mocked correctly
 
 ---
 
