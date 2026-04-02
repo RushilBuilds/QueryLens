@@ -317,10 +317,10 @@ Goal: a live page showing every stage's current status — the first thing an op
 
 Goal: show the sequence of anomalies and their causal relationships so operators can understand fault propagation at a glance.
 
-- [ ] Build `AnomalyTimelineView` — Plotly event timeline showing anomaly events per stage over the last N minutes; hoverable with detector type and signal value
-- [ ] Build `CausalGraphView` — renders the `CausalDAG` using `networkx` + Plotly with nodes coloured by anomaly state and edges weighted by propagation delay
-- [ ] Highlight the top-ranked root cause stage from the latest `LocalizationResult` in red
-- [ ] Wire both views to auto-refresh every 10 seconds
+- [x] Build `AnomalyTimelineView` — Plotly event timeline showing anomaly events per stage over the last N minutes; hoverable with detector type and signal value
+- [x] Build `CausalGraphView` — renders the `CausalDAG` using `networkx` + Plotly with nodes coloured by anomaly state and edges weighted by propagation delay
+- [x] Highlight the top-ranked root cause stage from the latest `LocalizationResult` in red
+- [x] Wire both views to auto-refresh every 10 seconds
 
 ---
 
