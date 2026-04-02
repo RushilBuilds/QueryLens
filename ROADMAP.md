@@ -294,9 +294,9 @@ Goal: give operators visibility into every automated decision the system has mad
 
 Goal: verify the API works end-to-end with real Redpanda and PostgreSQL before the dashboard is built on top of it.
 
-- [ ] Write `tests/test_api_integration.py` — spins up `testcontainers` for PostgreSQL and Redpanda, runs `SimulatorEngine` to populate data, hits every API endpoint
-- [ ] Assert response latency for paginated queries is under 200ms at 100,000-row table size
-- [ ] Assert `/health` correctly reflects container state transitions (kill postgres, assert 503, restart, assert 200)
+- [x] Write `tests/test_api_integration.py` — spins up `testcontainers` for PostgreSQL and Redpanda, runs `SimulatorEngine` to populate data, hits every API endpoint
+- [x] Assert response latency for paginated queries is under 200ms at 100,000-row table size
+- [x] Assert `/health` correctly reflects container state transitions (kill postgres, assert 503, restart, assert 200)
 
 ---
 
