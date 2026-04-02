@@ -271,10 +271,10 @@ Goal: get a running, tested API process before adding any domain routes — foun
 
 Goal: expose the current and historical state of every pipeline stage so the dashboard and operators have a query surface.
 
-- [ ] `GET /stages` — returns all stages with current circuit breaker state and latest p99 latency from `SlidingWindowAggregator`
-- [ ] `GET /stages/{stage_id}/metrics` — paginated time-series query against `pipeline_metrics` with `start`, `end`, and `resolution` query params
-- [ ] `GET /stages/{stage_id}/anomalies` — returns anomaly events for a stage, filterable by detector type and time range
-- [ ] Write tests for each endpoint: fixture data in PostgreSQL, assert response schema and pagination behavior
+- [x] `GET /stages` — returns all stages with current circuit breaker state and latest p99 latency from `SlidingWindowAggregator`
+- [x] `GET /stages/{stage_id}/metrics` — paginated time-series query against `pipeline_metrics` with `start`, `end`, and `resolution` query params
+- [x] `GET /stages/{stage_id}/anomalies` — returns anomaly events for a stage, filterable by detector type and time range
+- [x] Write tests for each endpoint: fixture data in PostgreSQL, assert response schema and pagination behavior
 
 ---
 
