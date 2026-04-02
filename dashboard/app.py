@@ -15,7 +15,9 @@ import os
 import streamlit as st
 
 from dashboard.api_client import QueryLensAPI
+from dashboard.views.causal_graph import render_causal_graph
 from dashboard.views.health import render_pipeline_health
+from dashboard.views.timeline import render_anomaly_timeline
 
 # ---------------------------------------------------------------------------
 # Page config — must be the first Streamlit call
@@ -69,3 +71,35 @@ try:
     render_pipeline_health(stages)
 except Exception as exc:
     st.error(f"Failed to load stages: {exc}")
+    stages = []
+
+# ---------------------------------------------------------------------------
+# Anomaly timeline
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Anomaly Timeline")
+
+try:
+    all_anomalies = []
+    for stage in stages:
+        resp = api.stage_anomalies(stage["stage_id"], page_size=50)
+        for item in resp.get("items", []):
+            item["stage_id"] = stage["stage_id"]
+            all_anomalies.append(item)
+    render_anomaly_timeline(all_anomalies)
+except Exception as exc:
+    st.error(f"Failed to load anomalies: {exc}")
+
+# ---------------------------------------------------------------------------
+# Causal graph
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Causal Graph")
+
+try:
+    localizations = api.localizations(page_size=1).get("items", [])
+    render_causal_graph(stages, localizations)
+except Exception as exc:
+    st.error(f"Failed to render causal graph: {exc}")
