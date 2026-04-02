@@ -328,10 +328,10 @@ Goal: show the sequence of anomalies and their causal relationships so operators
 
 Goal: make automated healing actions visible and give operators a one-click escape hatch to cancel them.
 
-- [ ] Build `HealingActivityView` — table of active and recent healing actions with action type, target stage, status, and elapsed time
-- [ ] Add `ManualOverridePanel` — dropdown to select a pending action, confirm button that calls `POST /healing/actions/{hypothesis_id}/override`
-- [ ] Show a `HealingAuditTrail` expander per action: triggering anomaly → localization → policy rule matched → outcome
-- [ ] Write smoke tests for all three views with mocked API responses
+- [x] Build `HealingActivityView` — table of active and recent healing actions with action type, target stage, status, and elapsed time
+- [x] Add `ManualOverridePanel` — dropdown to select a pending action, confirm button that calls `POST /healing/actions/{hypothesis_id}/override`
+- [x] Show a `HealingAuditTrail` expander per action: triggering anomaly → localization → policy rule matched → outcome
+- [x] Write smoke tests for all three views with mocked API responses
 
 ---
 
