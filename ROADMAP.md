@@ -282,11 +282,11 @@ Goal: expose the current and historical state of every pipeline stage so the das
 
 Goal: give operators visibility into every automated decision the system has made and is currently executing.
 
-- [ ] `GET /localizations` — paginated list of `LocalizationResult` records with top candidate and posterior probability
-- [ ] `GET /localizations/{hypothesis_id}` — full detail including all evidence event IDs and ranked candidates
-- [ ] `GET /healing/actions` — paginated list of healing actions with outcome and timestamps
-- [ ] `POST /healing/actions/{hypothesis_id}/override` — manually mark a pending action as cancelled; writes to `healing_actions` with `outcome=cancelled` and operator identity
-- [ ] Write tests for all endpoints including the override flow
+- [x] `GET /localizations` — paginated list of `LocalizationResult` records with top candidate and posterior probability
+- [x] `GET /localizations/{hypothesis_id}` — full detail including all evidence event IDs and ranked candidates
+- [x] `GET /healing/actions` — paginated list of healing actions with outcome and timestamps
+- [x] `POST /healing/actions/{hypothesis_id}/override` — manually mark a pending action as cancelled; writes to `healing_actions` with `outcome=cancelled` and operator identity
+- [x] Write tests for all endpoints including the override flow
 
 ---
 
