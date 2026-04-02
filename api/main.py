@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from api.config import Settings, get_settings
+from api.routes_stages import router as stages_router
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     )
     FastAPIInstrumentor.instrument_app(app)
     app.middleware("http")(_request_context_middleware)
+    app.include_router(stages_router)
 
     @app.get("/health")
     def health(request: Request) -> Dict[str, Any]:
