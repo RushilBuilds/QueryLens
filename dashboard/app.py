@@ -17,6 +17,7 @@ import streamlit as st
 from dashboard.api_client import QueryLensAPI
 from dashboard.views.causal_graph import render_causal_graph
 from dashboard.views.health import render_pipeline_health
+from dashboard.views.healing import render_audit_trail, render_healing_activity, render_override_panel
 from dashboard.views.timeline import render_anomaly_timeline
 
 # ---------------------------------------------------------------------------
@@ -103,3 +104,19 @@ try:
     render_causal_graph(stages, localizations)
 except Exception as exc:
     st.error(f"Failed to render causal graph: {exc}")
+
+# ---------------------------------------------------------------------------
+# Healing activity
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Healing Activity")
+
+try:
+    healing_resp = api.healing_actions(page_size=50)
+    healing_items = healing_resp.get("items", [])
+    render_healing_activity(healing_items)
+    render_override_panel(healing_items, api)
+    render_audit_trail(healing_items, api)
+except Exception as exc:
+    st.error(f"Failed to load healing actions: {exc}")
