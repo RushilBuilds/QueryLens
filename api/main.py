@@ -14,6 +14,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from api.config import Settings, get_settings
+from api.routes_healing import router as healing_router
+from api.routes_localizations import router as localizations_router
 from api.routes_stages import router as stages_router
 
 
@@ -131,6 +133,8 @@ def create_app() -> FastAPI:
     FastAPIInstrumentor.instrument_app(app)
     app.middleware("http")(_request_context_middleware)
     app.include_router(stages_router)
+    app.include_router(localizations_router)
+    app.include_router(healing_router)
 
     @app.get("/health")
     def health(request: Request) -> Dict[str, Any]:
