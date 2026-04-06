@@ -4,6 +4,48 @@ This document logs every major architectural decision made during the developmen
 
 ---
 
+## ADR-038: Closed-loop self-healing test parameterized over fault types rather than one test per fault
+**Date:** 2026-04-05
+**Decision:** A single `@pytest.mark.parametrize` test covers all six fault types (latency_spike, memory_pressure, schema_drift, dropped_connection, throughput_degradation, cpu_contention) instead of six separate test functions
+**Alternatives considered:** One test function per fault type; a shared fixture that loops internally
+**Reasoning:** Each fault type exercises the same closed-loop path (inject → detect → localize → heal → verify), differing only in the FaultSpec parameters and the expected healing action. Six separate functions would duplicate ~40 lines of setup per test and make adding a seventh fault type require copying an entire test. Parameterization keeps the test logic in one place and makes the fault-type matrix visible in pytest output via the id parameter.
+
+## ADR-037: Dashboard views accept API response dicts, not domain objects
+**Date:** 2026-04-04
+**Decision:** Streamlit view functions in `dashboard/views/` accept plain dicts (the JSON responses from `QueryLensAPI`) rather than importing domain dataclasses like `LocalizationResult`
+**Alternatives considered:** Import and construct domain objects in the dashboard layer; shared DTO module between API and dashboard
+**Reasoning:** The dashboard is a read-only consumer of the REST API — it should depend on the HTTP contract, not on internal domain types. Importing `LocalizationResult` would couple the dashboard to the causal package, meaning a field rename in the domain layer would break the dashboard even if the API contract is stable. Dict access with `.get()` mirrors what a real frontend (React, etc.) would do and keeps the dashboard independently deployable.
+
+## ADR-036: HealingActivityView, ManualOverridePanel, and AuditTrail as separate view functions, not one monolith
+**Date:** 2026-04-04
+**Decision:** Split healing UI into three composable view functions: `render_healing_activity()`, `render_override_panel()`, `render_audit_trail()`
+**Alternatives considered:** Single `render_healing_dashboard()` function; Streamlit multi-page with separate healing pages
+**Reasoning:** The override panel requires a selectbox and confirmation button that mutate state (POST to the API), while the activity table and audit trail are read-only. Mixing mutation and display in one function makes testing harder — the test must mock both the read and write paths simultaneously. Separate functions let the override panel be tested with a mock API client while the activity table is tested with static data. Multi-page was rejected because the healing views are contextually related and should appear on one screen for operator situational awareness.
+
+## ADR-035: Causal graph visualization uses Plotly scatter, not networkx drawing or graphviz
+**Date:** 2026-04-03
+**Decision:** `render_causal_graph()` builds a Plotly scatter trace for nodes and line traces for edges rather than using `nx.draw()` or graphviz
+**Alternatives considered:** `matplotlib` via `nx.draw()` rendered as `st.pyplot()`; graphviz DOT via `st.graphviz_chart()`
+**Reasoning:** `st.pyplot()` renders a static raster image that cannot be zoomed, panned, or hovered — operators need to hover on a node to see its health stats without clicking through. Graphviz produces better layouts but requires a system-level graphviz installation that complicates the Docker image and CI. Plotly scatter with a custom `_layered_positions()` layout gives interactive hover, is pure Python, and integrates natively with Streamlit via `st.plotly_chart()`.
+
+## ADR-034: API client class centralizes all endpoint calls rather than inline requests in views
+**Date:** 2026-04-03
+**Decision:** `dashboard/api_client.py` provides a `QueryLensAPI` class that wraps all REST calls with `requests.Session`
+**Alternatives considered:** Inline `requests.get()` calls in each Streamlit view function; httpx async client
+**Reasoning:** Inline requests scatter URL construction and error handling across every view, making base URL changes a multi-file edit. A centralized client keeps URL patterns in one place and lets tests inject a mock client without patching `requests` globally. `requests.Session` was chosen over httpx because Streamlit's execution model is synchronous (re-runs the script top-to-bottom on every interaction) — async would require `asyncio.run()` wrappers with no concurrency benefit in a single-threaded Streamlit app.
+
+## ADR-033: FastAPI /health checks real DB and Redpanda connectivity, not just process liveness
+**Date:** 2026-04-02
+**Decision:** `GET /health` executes `SELECT 1` against PostgreSQL and `list_topics()` against the Kafka producer, returning 503 with component-level detail if either fails
+**Alternatives considered:** Simple 200 OK (process alive); separate `/health/live` and `/health/ready` endpoints
+**Reasoning:** A liveness-only check (process responds to HTTP) would keep the service in a load balancer rotation even when the database connection pool is exhausted or the Redpanda cluster is unreachable — requests would be accepted and fail downstream. The combined check matches the Kubernetes readiness probe pattern: 503 removes the pod from the service endpoint until both dependencies recover. Separate live/ready was considered but adds complexity without benefit for a single-deployment topology.
+
+## ADR-032: FastAPI create_app() factory with lifespan context manager over module-level globals
+**Date:** 2026-04-02
+**Decision:** `api/main.py` uses a `create_app()` factory that initializes SQLAlchemy engine and Kafka producer inside a lifespan async context manager, storing them on `app.state`
+**Alternatives considered:** Module-level engine and producer globals; dependency injection via `Depends(get_engine)`
+**Reasoning:** Module-level globals are initialized at import time, which means tests that import the module create real database connections before any fixture can intercept them. The factory pattern lets each test call `create_app()` with overridden settings and get an isolated app instance. The lifespan context manager guarantees `engine.dispose()` and `producer.flush()` run on shutdown — a missing dispose leaks connection pool resources in CI where each test module spins up a fresh app.
+
 ## ADR-031: FaultLocalizationEngine uses gap-based window correlation, not fixed sliding window
 **Date:** 2026-03-26
 **Decision:** `AnomalyWindowCollector` closes a window when the gap since the last anomaly exceeds `gap_duration_s`, not when `gap_duration_s` has elapsed since the window opened
