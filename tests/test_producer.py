@@ -15,7 +15,19 @@ from typing import List
 
 import pytest
 from confluent_kafka import Consumer, TopicPartition
-from testcontainers.kafka import KafkaContainer
+
+try:
+    import docker
+    docker.from_env().ping()
+    from testcontainers.kafka import KafkaContainer
+    _CONTAINERS_AVAILABLE = True
+except Exception:
+    _CONTAINERS_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _CONTAINERS_AVAILABLE,
+    reason="Docker or testcontainers not available",
+)
 
 from ingestion.producer import ProducerHealthCheck, RedpandaProducer
 from ingestion.serializer import MetricEventSerializer, SerializationError

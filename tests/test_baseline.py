@@ -17,7 +17,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
-from testcontainers.postgres import PostgresContainer
+try:
+    import docker
+    docker.from_env().ping()
+    from testcontainers.postgres import PostgresContainer
+    _CONTAINERS_AVAILABLE = True
+except Exception:
+    _CONTAINERS_AVAILABLE = False
 
 from detection.baseline import (
     BaselineEntry,
@@ -309,6 +315,10 @@ def _insert_events(
     engine.dispose()
 
 
+@pytest.mark.skipif(
+    not _CONTAINERS_AVAILABLE,
+    reason="Docker or testcontainers not available",
+)
 class TestBaselineFitterIntegration:
     """
     50 events per (stage, hour_of_week) slot for stable statistics in the 5%

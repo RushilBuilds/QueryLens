@@ -18,13 +18,13 @@ All six fault types from Milestone 3 are exercised with known magnitudes.
 
 | Detector | Fault Type | Recall | FPR | Mean Detection Lag (events) | Pass |
 |---|---|---|---|---|---|
-| cusum | dropped_connection | 1.00 | 0.000 | 0.6 | ✓ |
+| cusum | dropped_connection | 1.00 | 0.000 | 0.2 | ✓ |
 | cusum | error_burst | 1.00 | 0.000 | 0.2 | ✓ |
 | cusum | latency_spike | 1.00 | 0.000 | 0.0 | ✓ |
 | cusum | partition_skew | 1.00 | 0.000 | 0.0 | ✓ |
 | cusum | schema_drift | 1.00 | 0.000 | 0.0 | ✓ |
 | cusum | throughput_collapse | 1.00 | 0.000 | 1.0 | ✓ |
-| ewma | dropped_connection | 1.00 | 0.000 | 0.6 | ✓ |
+| ewma | dropped_connection | 1.00 | 0.000 | 0.2 | ✓ |
 | ewma | error_burst | 1.00 | 0.000 | 0.2 | ✓ |
 | ewma | latency_spike | 1.00 | 0.000 | 0.0 | ✓ |
 | ewma | partition_skew | 1.00 | 0.000 | 0.0 | ✓ |

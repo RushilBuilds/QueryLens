@@ -24,9 +24,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 try:
+    import docker
+    docker.from_env().ping()
     from testcontainers.postgres import PostgresContainer
     _CONTAINERS_AVAILABLE = True
-except ImportError:
+except Exception:
     _CONTAINERS_AVAILABLE = False
 
 POSTGRES_IMAGE = "postgres:16-alpine"

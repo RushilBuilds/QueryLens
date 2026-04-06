@@ -25,14 +25,16 @@ from healing.circuit_breaker import CircuitBreakerConfig, CircuitBreakerState
 from healing.registry import CircuitBreakerRegistry
 
 try:
+    import docker
+    docker.from_env().ping()
     from testcontainers.postgres import PostgresContainer
     _CONTAINERS_AVAILABLE = True
-except ImportError:
+except Exception:
     _CONTAINERS_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
     not _CONTAINERS_AVAILABLE,
-    reason="testcontainers not installed",
+    reason="Docker or testcontainers not available",
 )
 
 POSTGRES_IMAGE = "postgres:16-alpine"

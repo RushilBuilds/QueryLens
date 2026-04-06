@@ -30,15 +30,17 @@ from ingestion.serializer import MetricEventSerializer
 from simulator.models import PipelineEvent
 
 try:
+    import docker
+    docker.from_env().ping()
     from testcontainers.kafka import KafkaContainer
     from testcontainers.postgres import PostgresContainer
     _CONTAINERS_AVAILABLE = True
-except ImportError:
+except Exception:
     _CONTAINERS_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
     not _CONTAINERS_AVAILABLE,
-    reason="testcontainers not installed",
+    reason="Docker or testcontainers not available",
 )
 
 KAFKA_IMAGE  = "confluentinc/cp-kafka:7.6.0"

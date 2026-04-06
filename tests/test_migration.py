@@ -19,7 +19,19 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-from testcontainers.postgres import PostgresContainer
+
+try:
+    import docker
+    docker.from_env().ping()
+    from testcontainers.postgres import PostgresContainer
+    _CONTAINERS_AVAILABLE = True
+except Exception:
+    _CONTAINERS_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _CONTAINERS_AVAILABLE,
+    reason="Docker or testcontainers not available",
+)
 
 from ingestion.models import AnomalyEventRow, FaultLocalizationRow, PipelineMetric
 
